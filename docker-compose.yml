@@ -1,0 +1,84 @@
+services:
+  ubuntu1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ansible-ubuntu:24.04
+    container_name: ansible-ubuntu1
+    hostname: ansible-ubuntu1
+    ports:
+      - "2201:22"
+    volumes:
+      - ubuntu1-home:/home/ansible
+      - ubuntu1-data:/data
+      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
+    networks:
+      - ansible-lab-net
+
+  ubuntu2:
+    image: ansible-ubuntu:24.04
+    container_name: ansible-ubuntu2
+    hostname: ansible-ubuntu2
+    ports:
+      - "2202:22"
+    volumes:
+      - ubuntu2-home:/home/ansible
+      - ubuntu2-data:/data
+      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
+    networks:
+      - ansible-lab-net
+
+  ubuntu3:
+    image: ansible-ubuntu:24.04
+    container_name: ansible-ubuntu3
+    hostname: ansible-ubuntu3
+    ports:
+      - "2203:22"
+    volumes:
+      - ubuntu3-home:/home/ansible
+      - ubuntu3-data:/data
+      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
+    networks:
+      - ansible-lab-net
+
+  ubuntu4:
+    image: ansible-ubuntu:24.04
+    container_name: ansible-ubuntu4
+    hostname: ansible-ubuntu4
+    ports:
+      - "2204:22"
+    volumes:
+      - ubuntu4-home:/home/ansible
+      - ubuntu4-data:/data
+      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
+    networks:
+      - ansible-lab-net
+
+  ubuntu5:
+    image: ansible-ubuntu:24.04
+    container_name: ansible-ubuntu5
+    hostname: ansible-ubuntu5
+    ports:
+      - "2205:22"
+    volumes:
+      - ubuntu5-home:/home/ansible
+      - ubuntu5-data:/data
+      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
+    networks:
+      - ansible-lab-net
+
+volumes:
+  ubuntu1-home:
+  ubuntu1-data:
+  ubuntu2-home:
+  ubuntu2-data:
+  ubuntu3-home:
+  ubuntu3-data:
+  ubuntu4-home:
+  ubuntu4-data:
+  ubuntu5-home:
+  ubuntu5-data:
+
+networks:
+  ansible-lab-net:
+    driver: bridge
