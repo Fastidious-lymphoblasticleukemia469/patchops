@@ -1,0 +1,9 @@
+---
+# Aptly client configuration
+aptly_hostname: patchops-aptly
+aptly_port: 80
+aptly_env: dev
+aptly_components: "main restricted universe multiverse"
+aptly_arch: amd64
+aptly_pin_priority: 900
+aptly_ubuntu_release: "{{ ansible_distribution_release }}"

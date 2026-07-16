@@ -1,0 +1,81 @@
+---
+# Rollback an environment to a previous snapshot.
+# Usage: ansible-playbook playbooks/rollback.yml -e "env=dev snapshot=patchops-1234567890"
+
+- name: Rollback environment to previous snapshot
+  hosts: aptly
+  become: true
+  vars:
+    aptly_config: /etc/aptly/aptly.conf
+    aptly_user: aptly
+    env: dev
+    snapshot: ""
+
+  tasks:
+    - name: Validate environment parameter
+      ansible.builtin.assert:
+        that:
+          - env in ['dev', 'staging', 'prod']
+        fail_msg: "env must be one of: dev, staging, prod"
+
+    - name: List available snapshots if none specified
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
+      become_user: "{{ aptly_user }}"
+      register: snapshot_list
+      when: snapshot == ""
+      changed_when: false
+
+    - name: Show available snapshots
+      ansible.builtin.debug:
+        msg: "{{ snapshot_list.stdout_lines | select('search', '^patchops-') | sort }}"
+      when: snapshot == ""
+
+    - name: Fail if no snapshot specified
+      ansible.builtin.fail:
+        msg: >
+          No snapshot specified. Run with -e "snapshot=<name>".
+          Available patchops snapshots shown above.
+      when: snapshot == ""
+
+    - name: Verify target snapshot exists
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot show {{ snapshot }}"
+      become_user: "{{ aptly_user }}"
+      register: snapshot_show
+      changed_when: false
+      failed_when: "'Name:' not in snapshot_show.stdout"
+
+    - name: Confirm rollback
+      ansible.builtin.debug:
+        msg:
+          - "ROLLBACK: Rolling back /{{ env }}/ to {{ snapshot }}"
+          - "This will switch the published repo to this older snapshot."
+
+    - name: Perform rollback
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish switch
+          -batch
+          -prefix={{ env }}
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ snapshot }}
+          patchops-{{ snapshot | regex_search('(\\d{10})') }}
+      become_user: "{{ aptly_user }}"
+      register: rollback
+      changed_when: "'successfully updated' in rollback.stdout or 'successfully published' in rollback.stdout"
+      failed_when: false
+
+    - name: Verify rollback
+      ansible.builtin.uri:
+        url: "http://localhost:80/{{ env }}/dists/"
+        return_content: yes
+      register: verify
+      failed_when: "'dists' not in verify.content"
+
+    - name: Rollback complete
+      ansible.builtin.debug:
+        msg:
+          - "Rolled back /{{ env }}/ to {{ snapshot }}"
+          - "URL: http://patchops-aptly:80/{{ env }}/dists/"

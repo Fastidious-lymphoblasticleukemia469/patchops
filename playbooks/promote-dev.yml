@@ -1,0 +1,70 @@
+---
+# Promote the latest snapshot to /dev
+# This is an immediate promotion — no bake-time gate.
+
+- name: Promote latest snapshot to dev
+  hosts: aptly
+  become: true
+  vars:
+    aptly_config: /etc/aptly/aptly.conf
+    aptly_user: aptly
+
+  tasks:
+    - name: List all available snapshots
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
+      become_user: "{{ aptly_user }}"
+      register: snapshot_list
+      changed_when: false
+
+    - name: Find latest patchops snapshot
+      ansible.builtin.set_fact:
+        latest_snapshot: "{{ snapshot_list.stdout_lines | select('search', '^patchops-') | sort | last }}"
+
+    - name: Show target snapshot
+      ansible.builtin.debug:
+        msg: "Promoting {{ latest_snapshot }} to /dev/"
+
+    - name: Publish snapshot to dev
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish switch
+          -batch
+          -prefix=dev
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ latest_snapshot }}
+          patchops-{{ latest_snapshot | regex_search('(\\d{10})') }}
+      become_user: "{{ aptly_user }}"
+      register: publish
+      changed_when: "'successfully updated' in publish.stdout or 'successfully published' in publish.stdout"
+      failed_when: false
+
+    # Fallback: initial publish if switch fails
+    - name: Initial publish to dev (if switch failed)
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish snapshot
+          -batch
+          -prefix=dev
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ latest_snapshot }}
+      become_user: "{{ aptly_user }}"
+      when: "'successfully updated' not in publish.stdout and 'successfully published' not in publish.stdout"
+      register: publish_init
+      changed_when: "'successfully published' in publish_init.stdout"
+      failed_when: false
+
+    - name: Verify dev route is accessible
+      ansible.builtin.uri:
+        url: "http://localhost:80/dev/dists/"
+        return_content: yes
+      register: verify
+      failed_when: "'dists' not in verify.content"
+
+    - name: Dev promotion complete
+      ansible.builtin.debug:
+        msg:
+          - "Published {{ latest_snapshot }} to /dev/"
+          - "URL: http://patchops-aptly:80/dev/dists/"

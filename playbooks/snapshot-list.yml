@@ -1,0 +1,63 @@
+---
+# List all aptly snapshots, mirrors, and published repos.
+
+- name: List aptly state
+  hosts: aptly
+  become: true
+  vars:
+    aptly_config: /etc/aptly/aptly.conf
+    aptly_user: aptly
+
+  tasks:
+    - name: List mirrors
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} mirror list -raw"
+      become_user: "{{ aptly_user }}"
+      register: mirrors
+      changed_when: false
+
+    - name: Show mirrors
+      ansible.builtin.debug:
+        msg:
+          - "=== Mirrors ==="
+          - "{{ mirrors.stdout_lines if mirrors.stdout_lines else ['(none)'] }}"
+
+    - name: List snapshots
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
+      become_user: "{{ aptly_user }}"
+      register: snapshots
+      changed_when: false
+
+    - name: Show snapshots
+      ansible.builtin.debug:
+        msg:
+          - "=== Snapshots ==="
+          - "{{ snapshots.stdout_lines if snapshots.stdout_lines else ['(none)'] }}"
+
+    - name: List published repos
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} publish list"
+      become_user: "{{ aptly_user }}"
+      register: published
+      changed_when: false
+
+    - name: Show published repos
+      ansible.builtin.debug:
+        msg:
+          - "=== Published Repos ==="
+          - "{{ published.stdout_lines if published.stdout_lines else ['(none)'] }}"
+
+    - name: Test environment routes
+      ansible.builtin.uri:
+        url: "http://localhost:80/{{ item }}/dists/"
+        return_content: yes
+        status_code: [200, 301, 302, 403]
+      register: route_check
+      loop: [dev, staging, prod]
+      failed_when: false
+
+    - name: Show route status
+      ansible.builtin.debug:
+        msg: "Route /{{ item.item }}/: {{ item.status | default('error') }}"
+      loop: "{{ route_check.results }}"

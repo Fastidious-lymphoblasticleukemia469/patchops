@@ -1,0 +1,216 @@
+---
+- name: Initialize Aptly mirror server with environment-based publishing
+  hosts: aptly
+  become: true
+  vars:
+    aptly_config: /etc/aptly/aptly.conf
+    aptly_data: /var/cache/aptly
+    aptly_user: aptly
+    environments:
+      - dev
+      - staging
+      - prod
+    ubuntu_repos:
+      - name: ubuntu-noble
+        mirror: http://archive.ubuntu.com/ubuntu/
+        distribution: noble
+        component: "main restricted universe multiverse"
+      - name: ubuntu-noble-updates
+        mirror: http://archive.ubuntu.com/ubuntu/
+        distribution: noble-updates
+        component: "main restricted universe multiverse"
+      - name: ubuntu-noble-security
+        mirror: http://security.ubuntu.com/ubuntu/
+        distribution: noble-security
+        component: "main restricted universe multiverse"
+      - name: ubuntu-noble-backports
+        mirror: http://archive.ubuntu.com/ubuntu/
+        distribution: noble-backports
+        component: "main restricted universe multiverse"
+    third_party_repos:
+      - name: docker
+        mirror: https://download.docker.com/linux/ubuntu
+        distribution: noble
+        component: stable
+      - name: nodesource-20
+        mirror: https://deb.nodesource.com/node_20.x
+        distribution: nodistro
+        component: main
+      - name: nginx-mainline
+        mirror: http://nginx.org/packages/mainline/ubuntu
+        distribution: noble
+        component: nginx
+    all_repos: "{{ ubuntu_repos + third_party_repos }}"
+
+  tasks:
+    - name: Ensure aptly directory structure exists
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ aptly_user }}"
+        group: "{{ aptly_user }}"
+        mode: "0755"
+      loop:
+        - "{{ aptly_data }}"
+        - "{{ aptly_data }}/db"
+        - "{{ aptly_data }}/pool"
+        - "{{ aptly_data }}/public"
+        - "{{ aptly_data }}/state"
+        - "/home/{{ aptly_user }}/.gnupg"
+
+    - name: Import Ubuntu archive GPG keys
+      ansible.builtin.raw: |
+        gpg --no-default-keyring --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg --export | \
+        gpg --no-default-keyring --keyring /home/aptly/.gnupg/trustedkeys.gpg --import 2>/dev/null || true
+        chown -R aptly:aptly /home/aptly/.gnupg/
+
+    # ── Mirrors ──────────────────────────────────────────────────
+    - name: Create mirrors for all repos
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} mirror create
+          -architectures=amd64
+          {{ item.name }}
+          {{ item.mirror }}
+          {{ item.distribution }} {{ item.component }}
+      become_user: "{{ aptly_user }}"
+      loop: "{{ all_repos }}"
+      register: mirror_create
+      changed_when: "'successfully added' in mirror_create.stdout"
+      failed_when: false
+
+    - name: Update all mirrors
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} mirror update {{ item.name }}"
+      become_user: "{{ aptly_user }}"
+      loop: "{{ all_repos }}"
+      register: mirror_update
+      changed_when: "'Downloaded' in mirror_update.stdout or 'packages' in mirror_update.stdout"
+      failed_when: false
+      timeout: 600
+
+    # ── Snapshots ────────────────────────────────────────────────
+    - name: Create snapshots of each mirror
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot create
+          {{ item.name }}-{{ ansible_date_time.epoch }}
+          from mirror {{ item.name }}
+      become_user: "{{ aptly_user }}"
+      loop: "{{ all_repos }}"
+      register: snapshot_create
+      changed_when: "'Snapshot' in snapshot_create.stdout"
+      failed_when: false
+
+    - name: Merge Ubuntu snapshots into single noble snapshot
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot merge -latest
+          noble-{{ ansible_date_time.epoch }}
+          ubuntu-noble-{{ ansible_date_time.epoch }}
+          ubuntu-noble-updates-{{ ansible_date_time.epoch }}
+          ubuntu-noble-security-{{ ansible_date_time.epoch }}
+          ubuntu-noble-backports-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      register: snapshot_merge_ubuntu
+      changed_when: "'Snapshot' in snapshot_merge_ubuntu.stdout"
+      failed_when: false
+
+    - name: Merge third-party snapshots into single third-party snapshot
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot merge -latest
+          thirdparty-{{ ansible_date_time.epoch }}
+          docker-{{ ansible_date_time.epoch }}
+          nodesource-20-{{ ansible_date_time.epoch }}
+          nginx-mainline-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      register: snapshot_merge_tp
+      changed_when: "'Snapshot' in snapshot_merge_tp.stdout"
+      failed_when: false
+
+    - name: Merge all into a single combined snapshot
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot merge -latest
+          patchops-latest
+          noble-{{ ansible_date_time.epoch }}
+          thirdparty-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      register: snapshot_merge_all
+      changed_when: "'Snapshot' in snapshot_merge_all.stdout"
+      failed_when: false
+
+    - name: Store the snapshot name for later use
+      ansible.builtin.set_fact:
+        patchops_snapshot_name: "patchops-{{ ansible_date_time.epoch }}"
+
+    # ── Publish to all environments ──────────────────────────────
+    - name: Publish combined snapshot to all environments
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish snapshot
+          -batch
+          -prefix={{ item }}
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          patchops-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      loop: "{{ environments }}"
+      register: publish_all
+      changed_when: "'has been successfully published' in publish_all.stdout"
+      failed_when: false
+
+    # ── Verification ─────────────────────────────────────────────
+    - name: List published repos
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} publish list"
+      become_user: "{{ aptly_user }}"
+      register: publish_list
+      changed_when: false
+
+    - name: Show published repos
+      ansible.builtin.debug:
+        var: publish_list.stdout_lines
+
+    - name: Verify nginx serves dev environment
+      ansible.builtin.uri:
+        url: "http://localhost:80/dev/dists/"
+        return_content: yes
+      register: nginx_dev
+      retries: 5
+      delay: 2
+      until: "'dists' in nginx_dev.content"
+
+    - name: Verify nginx serves staging environment
+      ansible.builtin.uri:
+        url: "http://localhost:80/staging/dists/"
+        return_content: yes
+      register: nginx_staging
+      retries: 5
+      delay: 2
+      until: "'dists' in nginx_staging.content"
+
+    - name: Verify nginx serves prod environment
+      ansible.builtin.uri:
+        url: "http://localhost:80/prod/dists/"
+        return_content: yes
+      register: nginx_prod
+      retries: 5
+      delay: 2
+      until: "'dists' in nginx_prod.content"
+
+    - name: Verify GPG public key is downloadable
+      ansible.builtin.uri:
+        url: "http://localhost:80/patchops-aptly.gpg"
+        return_content: yes
+      register: gpg_check
+      failed_when: "'BEGIN PGP PUBLIC KEY BLOCK' not in gpg_check.content"
+
+    - name: All environment routes verified
+      ansible.builtin.debug:
+        msg:
+          - "Dev:     http://localhost:80/dev/dists/"
+          - "Staging: http://localhost:80/staging/dists/"
+          - "Prod:    http://localhost:80/prod/dists/"
+          - "GPG Key: http://localhost:80/patchops-aptly.gpg"

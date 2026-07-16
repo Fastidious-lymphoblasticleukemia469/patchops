@@ -1,0 +1,90 @@
+---
+# Promote to /staging with bake-time validation.
+# Only promotes snapshots that have existed for >24 hours in dev.
+
+- name: Promote snapshot to staging (24hr bake gate)
+  hosts: aptly
+  become: true
+  vars:
+    aptly_config: /etc/aptly/aptly.conf
+    aptly_user: aptly
+    min_bake_hours: 24
+
+  tasks:
+    - name: List all available snapshots
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
+      become_user: "{{ aptly_user }}"
+      register: snapshot_list
+      changed_when: false
+
+    - name: Find latest patchops snapshot
+      ansible.builtin.set_fact:
+        latest_snapshot: "{{ snapshot_list.stdout_lines | select('search', '^patchops-') | sort | last }}"
+
+    - name: Extract snapshot epoch
+      ansible.builtin.set_fact:
+        snapshot_epoch: "{{ latest_snapshot | regex_search('(\\d{10})') }}"
+
+    - name: Calculate snapshot age in hours
+      ansible.builtin.set_fact:
+        snapshot_age_hours: "{{ ((ansible_date_time.epoch | int - snapshot_epoch | int) / 3600) | round(1) }}"
+
+    - name: Show promotion details
+      ansible.builtin.debug:
+        msg:
+          - "Snapshot: {{ latest_snapshot }}"
+          - "Snapshot age: {{ snapshot_age_hours }} hours"
+          - "Required bake time: {{ min_bake_hours }} hours"
+
+    - name: Fail if snapshot is too young
+      ansible.builtin.fail:
+        msg: >
+          Snapshot {{ latest_snapshot }} is only {{ snapshot_age_hours }} hours old.
+          Minimum bake time for staging is {{ min_bake_hours }} hours.
+          Wait {{ (min_bake_hours - snapshot_age_hours) | round(1) }} more hours before promoting.
+      when: snapshot_age_hours | float < min_bake_hours | float
+
+    - name: Publish snapshot to staging
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish switch
+          -batch
+          -prefix=staging
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ latest_snapshot }}
+          patchops-{{ snapshot_epoch }}
+      become_user: "{{ aptly_user }}"
+      register: publish
+      changed_when: "'successfully updated' in publish.stdout or 'successfully published' in publish.stdout"
+      failed_when: false
+
+    - name: Initial publish to staging (if switch failed)
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish snapshot
+          -batch
+          -prefix=staging
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ latest_snapshot }}
+      become_user: "{{ aptly_user }}"
+      when: "'successfully updated' not in publish.stdout and 'successfully published' not in publish.stdout"
+      register: publish_init
+      changed_when: "'successfully published' in publish_init.stdout"
+      failed_when: false
+
+    - name: Verify staging route
+      ansible.builtin.uri:
+        url: "http://localhost:80/staging/dists/"
+        return_content: yes
+      register: verify
+      failed_when: "'dists' not in verify.content"
+
+    - name: Staging promotion complete
+      ansible.builtin.debug:
+        msg:
+          - "Published {{ latest_snapshot }} to /staging/"
+          - "Age: {{ snapshot_age_hours }}h (passed {{ min_bake_hours }}h gate)"
+          - "URL: http://patchops-aptly:80/staging/dists/"

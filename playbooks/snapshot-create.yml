@@ -1,0 +1,184 @@
+---
+# Daily snapshot workflow:
+#   1. Update all mirrors (sync with upstream)
+#   2. Create timestamped snapshots
+#   3. Merge into a single combined snapshot
+#   4. Prune snapshots older than 90 days
+#   5. Publish the combined snapshot to /dev
+
+- name: Daily snapshot creation and dev promotion
+  hosts: aptly
+  become: true
+  vars:
+    aptly_config: /etc/aptly/aptly.conf
+    aptly_data: /var/cache/aptly
+    aptly_user: aptly
+    snapshot_retention_days: 90
+    ubuntu_repos:
+      - name: ubuntu-noble
+        mirror: http://archive.ubuntu.com/ubuntu/
+        distribution: noble
+        component: "main restricted universe multiverse"
+      - name: ubuntu-noble-updates
+        mirror: http://archive.ubuntu.com/ubuntu/
+        distribution: noble-updates
+        component: "main restricted universe multiverse"
+      - name: ubuntu-noble-security
+        mirror: http://security.ubuntu.com/ubuntu/
+        distribution: noble-security
+        component: "main restricted universe multiverse"
+      - name: ubuntu-noble-backports
+        mirror: http://archive.ubuntu.com/ubuntu/
+        distribution: noble-backports
+        component: "main restricted universe multiverse"
+    third_party_repos:
+      - name: docker
+        mirror: https://download.docker.com/linux/ubuntu
+        distribution: noble
+        component: stable
+      - name: nodesource-20
+        mirror: https://deb.nodesource.com/node_20.x
+        distribution: nodistro
+        component: main
+      - name: nginx-mainline
+        mirror: http://nginx.org/packages/mainline/ubuntu
+        distribution: noble
+        component: nginx
+    all_repos: "{{ ubuntu_repos + third_party_repos }}"
+
+  tasks:
+    # ── Sync mirrors ─────────────────────────────────────────────
+    - name: Update all mirrors
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} mirror update {{ item.name }}"
+      become_user: "{{ aptly_user }}"
+      loop: "{{ all_repos }}"
+      register: mirror_update
+      changed_when: "'Downloaded' in mirror_update.stdout or 'packages' in mirror_update.stdout"
+      failed_when: false
+      timeout: 600
+
+    # ── Create snapshots ─────────────────────────────────────────
+    - name: Create snapshot for each mirror
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot create
+          {{ item.name }}-{{ ansible_date_time.epoch }}
+          from mirror {{ item.name }}
+      become_user: "{{ aptly_user }}"
+      loop: "{{ all_repos }}"
+      register: snapshot_create
+      changed_when: "'Snapshot' in snapshot_create.stdout"
+      failed_when: false
+
+    - name: Merge Ubuntu snapshots
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot merge -latest
+          noble-{{ ansible_date_time.epoch }}
+          ubuntu-noble-{{ ansible_date_time.epoch }}
+          ubuntu-noble-updates-{{ ansible_date_time.epoch }}
+          ubuntu-noble-security-{{ ansible_date_time.epoch }}
+          ubuntu-noble-backports-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      register: merge_ubuntu
+      changed_when: "'Snapshot' in merge_ubuntu.stdout"
+      failed_when: false
+
+    - name: Merge third-party snapshots
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot merge -latest
+          thirdparty-{{ ansible_date_time.epoch }}
+          docker-{{ ansible_date_time.epoch }}
+          nodesource-20-{{ ansible_date_time.epoch }}
+          nginx-mainline-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      register: merge_tp
+      changed_when: "'Snapshot' in merge_tp.stdout"
+      failed_when: false
+
+    - name: Merge all into combined snapshot
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} snapshot merge -latest
+          patchops-{{ ansible_date_time.epoch }}
+          noble-{{ ansible_date_time.epoch }}
+          thirdparty-{{ ansible_date_time.epoch }}
+      become_user: "{{ aptly_user }}"
+      register: merge_all
+      changed_when: "'Snapshot' in merge_all.stdout"
+      failed_when: false
+
+    - name: Set snapshot fact
+      ansible.builtin.set_fact:
+        new_snapshot: "patchops-{{ ansible_date_time.epoch }}"
+
+    # ── Prune old snapshots (older than retention_days) ──────────
+    - name: List all snapshots
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
+      become_user: "{{ aptly_user }}"
+      register: snapshot_list
+      changed_when: false
+
+    - name: Prune old snapshots
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} snapshot drop {{ item }}"
+      become_user: "{{ aptly_user }}"
+      loop: "{{ snapshot_list.stdout_lines }}"
+      when:
+        - item | regex_search('(\\d{10})')
+        - (ansible_date_time.epoch | int - item | regex_search('(\\d{10})') | int) > (snapshot_retention_days * 86400)
+      register: pruned
+      changed_when: "'dropped' in pruned.stdout"
+      failed_when: false
+
+    # ── Publish to dev ───────────────────────────────────────────
+    - name: Publish latest snapshot to dev
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish switch
+          -batch
+          -prefix=dev
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ new_snapshot }}
+          patchops-{{ ansible_date_time.epoch }} || true
+      become_user: "{{ aptly_user }}"
+      register: publish_dev
+      changed_when: "'has been successfully updated' in publish_dev.stdout or 'has been successfully published' in publish_dev.stdout"
+      failed_when: false
+
+    # ── Fallback: initial publish if switch fails ────────────────
+    - name: Initial publish to dev (if switch failed)
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish snapshot
+          -batch
+          -prefix=dev
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          {{ new_snapshot }}
+      become_user: "{{ aptly_user }}"
+      when: "'has been successfully updated' not in publish_dev.stdout and 'has been successfully published' not in publish_dev.stdout"
+      register: publish_dev_init
+      changed_when: "'has been successfully published' in publish_dev_init.stdout"
+      failed_when: false
+
+    # ── Output ───────────────────────────────────────────────────
+    - name: Show published repos
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} publish list"
+      become_user: "{{ aptly_user }}"
+      register: publish_list
+      changed_when: false
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "New snapshot: {{ new_snapshot }}"
+          - "Published to: /dev/"
+          - "URL: http://{{ inventory_hostname }}:80/dev/dists/"
+          - "Published repos:"
+          - "{{ publish_list.stdout_lines }}"

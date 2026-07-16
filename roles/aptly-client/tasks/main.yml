@@ -1,0 +1,81 @@
+---
+- name: Backup original sources
+  ansible.builtin.copy:
+    src: /etc/apt/sources.list
+    dest: "/etc/apt/sources.list.bak.{{ ansible_date_time.date }}"
+    remote_src: true
+    force: false
+  when: ansible_os_family == "Debian"
+
+- name: Stop unattended-upgrades
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - unattended-upgrades
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+  failed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: Disable unattended-upgrades
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    masked: true
+  loop:
+    - unattended-upgrades
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+  failed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: Disable default apt sources
+  ansible.builtin.shell: |
+    mv /etc/apt/sources.list /etc/apt/sources.list.disabled 2>/dev/null || true
+    cd /etc/apt/sources.list.d
+    for f in *.list *.sources; do
+      [ -f "$f" ] && mv "$f" "$f.disabled" || true
+    done
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.disabled
+  when: ansible_os_family == "Debian"
+
+- name: Ensure keyrings directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: "0755"
+  when: ansible_os_family == "Debian"
+
+- name: Import PatchOps GPG key from aptly server
+  ansible.builtin.get_url:
+    url: "http://{{ aptly_hostname }}:{{ aptly_port }}/patchops-aptly.gpg"
+    dest: /usr/share/keyrings/patchops-archive-keyring.gpg
+    mode: "0644"
+    timeout: 10
+  register: gpg_key_import
+  until: gpg_key_import is succeeded
+  retries: 3
+  delay: 5
+  when: ansible_os_family == "Debian"
+
+- name: Create aptly source list with environment prefix
+  ansible.builtin.lineinfile:
+    path: /etc/apt/sources.list.d/patchops-mirror.list
+    line: "deb [arch={{ aptly_arch }} signed-by=/usr/share/keyrings/patchops-archive-keyring.gpg] http://{{ aptly_hostname }}:{{ aptly_port }}/{{ aptly_env }}/ {{ aptly_ubuntu_release }} {{ aptly_components }}"
+    create: true
+    mode: "0644"
+  when: ansible_os_family == "Debian"
+  notify: apt update
+
+- name: Create apt pinning for PatchOps mirror
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/patchops-mirror
+    content: |
+      Package: *
+      Pin: origin "{{ aptly_hostname }}"
+      Pin-Priority: {{ aptly_pin_priority }}
+    mode: "0644"
+  when: ansible_os_family == "Debian"

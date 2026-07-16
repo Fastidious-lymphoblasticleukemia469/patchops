@@ -1,4 +1,22 @@
 services:
+  aptly:
+    build:
+      context: .
+      dockerfile: aptly.Dockerfile
+    image: patchops-aptly:latest
+    container_name: patchops-aptly
+    hostname: patchops-aptly
+    ports:
+      - "80:80"
+      - "8080:8080"
+      - "2200:22"
+    volumes:
+      - aptly-data:/var/cache/aptly
+      - aptly-gnupg:/home/aptly/.gnupg
+      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
+    networks:
+      - ansible-lab-net
+
   ubuntu1:
     build:
       context: .
@@ -68,6 +86,8 @@ services:
       - ansible-lab-net
 
 volumes:
+  aptly-data:
+  aptly-gnupg:
   ubuntu1-home:
   ubuntu1-data:
   ubuntu2-home:

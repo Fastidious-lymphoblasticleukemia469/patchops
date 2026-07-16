@@ -1,0 +1,11 @@
+---
+# Configure clients for a specific environment.
+# Usage: ansible-playbook playbooks/configure-clients.yml -e "env=staging"
+
+- name: Configure servers to use Aptly mirror
+  hosts: "{{ target_group | default('ubuntu') }}"
+  become: true
+  vars:
+    target_group: ubuntu
+  roles:
+    - role: aptly-client
