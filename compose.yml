@@ -1,0 +1,47 @@
+# PatchOps Platform Stack — Governance DB + Dashboards
+# Usage: docker compose up -d
+# Depends on: nothing (standalone)
+
+services:
+  govdb:
+    image: postgres:16-alpine
+    container_name: patchops-govdb
+    hostname: patchops-govdb
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: patchgov
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${GOVDB_PASSWORD:-patchops_govdb_pass}
+    volumes:
+      - govdb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d patchgov"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: patchops-grafana
+    hostname: patchops-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: patchops
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/patch-ops.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      govdb:
+        condition: service_healthy
+
+volumes:
+  govdb-data:
+  grafana-data:

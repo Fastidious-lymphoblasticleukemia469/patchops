@@ -1,7 +1,11 @@
+# PatchOps Lab Stack — Aptly Mirror + Ubuntu Servers
+# Usage: docker compose -f compose.lab.yml up -d
+# Depends on: nothing (creates ansible-lab-net)
+
 services:
   aptly:
     build:
-      context: .
+      context: ./docker
       dockerfile: aptly.Dockerfile
     image: patchops-aptly:latest
     container_name: patchops-aptly
@@ -19,7 +23,7 @@ services:
 
   ubuntu1:
     build:
-      context: .
+      context: ./docker
       dockerfile: Dockerfile
     image: ansible-ubuntu:24.04
     container_name: ansible-ubuntu1
@@ -85,54 +89,9 @@ services:
     networks:
       - ansible-lab-net
 
-  govdb:
-    image: postgres:16-alpine
-    container_name: patchops-govdb
-    hostname: patchops-govdb
-    ports:
-      - "5433:5432"
-    environment:
-      POSTGRES_DB: patchgov
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${GOVDB_PASSWORD:-patchops_govdb_pass}
-    volumes:
-      - govdb-data:/var/lib/postgresql/data
-    networks:
-      - ansible-lab-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d patchgov"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  grafana:
-    image: grafana/grafana:10.4.0
-    container_name: patchops-grafana
-    hostname: patchops-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: patchops
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/patch-ops.json
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    networks:
-      - ansible-lab-net
-    depends_on:
-      govdb:
-        condition: service_healthy
-
 volumes:
   aptly-data:
   aptly-gnupg:
-  govdb-data:
-  grafana-data:
   ubuntu1-home:
   ubuntu1-data:
   ubuntu2-home:
