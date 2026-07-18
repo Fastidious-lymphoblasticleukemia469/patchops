@@ -3,7 +3,10 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -13,7 +16,7 @@
     ]
   },
   "description": "Every package available for upgrade, host by host, from the latest scan. Drill-down companion to Fleet & Snapshots.",
-  "editable": false,
+  "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
@@ -23,7 +26,9 @@
       "icon": "external link",
       "includeVars": true,
       "keepTime": false,
-      "tags": ["patching"],
+      "tags": [
+        "patching"
+      ],
       "title": "Fleet & Snapshots",
       "tooltip": "Current patch state and snapshot promotion status",
       "type": "dashboard",
@@ -34,7 +39,9 @@
       "icon": "external link",
       "includeVars": true,
       "keepTime": false,
-      "tags": ["patching"],
+      "tags": [
+        "patching"
+      ],
       "title": "Patch History",
       "tooltip": "Audit log of patches applied to hosts",
       "type": "dashboard",
@@ -44,45 +51,81 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 100,
       "title": "Action Required — Security Risk",
       "type": "row"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Highest CVSS score among pending security packages matching current filters.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green",  "value": null },
-              { "color": "yellow", "value": 4 },
-              { "color": "orange", "value": 7 },
-              { "color": "red",    "value": 9 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 4
+              },
+              {
+                "color": "orange",
+                "value": 7
+              },
+              {
+                "color": "red",
+                "value": 9
+              }
             ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
       "id": 1,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.0",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -94,37 +137,65 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Pending packages that carry a known CVE, matching the current severity filter.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green",  "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red",    "value": 20 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
             ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
       "id": 2,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.0",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -136,37 +207,65 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Distinct hosts carrying at least one pending CVE matching the current severity filter.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green",  "value": null },
-              { "color": "orange", "value": 1 },
-              { "color": "red",    "value": 5 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
             ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
       "id": 3,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.0",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -178,33 +277,58 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Every pending package (security + regular) across the current scope.",
       "fieldConfig": {
         "defaults": {
-          "color": { "fixedColor": "#5794F2", "mode": "fixed" },
+          "color": {
+            "fixedColor": "#5794F2",
+            "mode": "fixed"
+          },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "#5794F2", "value": null }]
+            "steps": [
+              {
+                "color": "#5794F2",
+                "value": null
+              }
+            ]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
       "id": 4,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.0",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -217,117 +341,272 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
       "id": 101,
       "title": "Security — CVEs Pending",
       "type": "row"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Every pending package with a known CVE, worst first.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {
             "align": "auto",
-            "cellOptions": { "type": "auto" },
+            "cellOptions": {
+              "type": "auto"
+            },
             "filterable": true,
             "inspect": false
           },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "hostname" },
-            "properties": [{ "id": "displayName", "value": "Hostname" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "env_name" },
-            "properties": [{ "id": "displayName", "value": "Environment" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "package_name" },
-            "properties": [{ "id": "displayName", "value": "Package" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "current_version" },
-            "properties": [{ "id": "displayName", "value": "Current Version" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "new_version" },
-            "properties": [{ "id": "displayName", "value": "New Version" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "cve_id" },
-            "properties": [{ "id": "displayName", "value": "CVE" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "cve_priority" },
+            "matcher": {
+              "id": "byName",
+              "options": "hostname"
+            },
             "properties": [
-              { "id": "displayName", "value": "Priority" },
+              {
+                "id": "displayName",
+                "value": "Hostname"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "env_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Environment"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "package_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Package"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "current_version"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Current Version"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "new_version"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "New Version"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cve_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "CVE"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cve_priority"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Priority"
+              },
               {
                 "id": "mappings",
                 "value": [
                   {
                     "options": {
-                      "critical":   { "color": "dark-red", "index": 0, "text": "CRITICAL" },
-                      "high":       { "color": "red",       "index": 1, "text": "HIGH" },
-                      "medium":     { "color": "orange",    "index": 2, "text": "MEDIUM" },
-                      "low":        { "color": "yellow",    "index": 3, "text": "LOW" },
-                      "negligible": { "color": "green",     "index": 4, "text": "NEGLIGIBLE" },
-                      "unknown":    { "color": "text",      "index": 5, "text": "UNKNOWN" }
+                      "critical": {
+                        "color": "dark-red",
+                        "index": 0,
+                        "text": "CRITICAL"
+                      },
+                      "high": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "HIGH"
+                      },
+                      "medium": {
+                        "color": "orange",
+                        "index": 2,
+                        "text": "MEDIUM"
+                      },
+                      "low": {
+                        "color": "yellow",
+                        "index": 3,
+                        "text": "LOW"
+                      },
+                      "negligible": {
+                        "color": "green",
+                        "index": 4,
+                        "text": "NEGLIGIBLE"
+                      },
+                      "unknown": {
+                        "color": "text",
+                        "index": 5,
+                        "text": "UNKNOWN"
+                      }
                     },
                     "type": "value"
                   }
                 ]
               },
-              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "cvss_score" },
+            "matcher": {
+              "id": "byName",
+              "options": "cvss_score"
+            },
             "properties": [
-              { "id": "displayName", "value": "CVSS" },
-              { "id": "decimals", "value": 1 },
+              {
+                "id": "displayName",
+                "value": "CVSS"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "green",  "value": null },
-                    { "color": "yellow", "value": 4 },
-                    { "color": "orange", "value": 7 },
-                    { "color": "red",    "value": 9 }
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 4
+                    },
+                    {
+                      "color": "orange",
+                      "value": 7
+                    },
+                    {
+                      "color": "red",
+                      "value": 9
+                    }
                   ]
                 }
               },
-              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "scan_timestamp" },
+            "matcher": {
+              "id": "byName",
+              "options": "scan_timestamp"
+            },
             "properties": [
-              { "id": "displayName", "value": "Last Scan" },
-              { "id": "unit", "value": "dateTimeFromNow" }
+              {
+                "id": "displayName",
+                "value": "Last Scan"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 12, "w": 18, "x": 0, "y": 6 },
+      "gridPos": {
+        "h": 12,
+        "w": 18,
+        "x": 0,
+        "y": 6
+      },
       "id": 5,
       "options": {
         "cellHeight": "sm",
-        "footer": { "countRows": true, "fields": "", "reducer": ["count"], "show": true },
+        "footer": {
+          "countRows": true,
+          "fields": "",
+          "reducer": [
+            "count"
+          ],
+          "show": true
+        },
         "showHeader": true,
-        "sortBy": [{ "desc": true, "displayName": "CVSS" }]
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "CVSS"
+          }
+        ]
       },
       "pluginVersion": "10.4.0",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -339,64 +618,134 @@
       "type": "table"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Pending CVE packages grouped by severity, worst first.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {
             "align": "center",
-            "cellOptions": { "type": "auto" },
+            "cellOptions": {
+              "type": "auto"
+            },
             "filterable": false,
             "inspect": false
           },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "cve_priority" },
+            "matcher": {
+              "id": "byName",
+              "options": "cve_priority"
+            },
             "properties": [
-              { "id": "displayName", "value": "Priority" },
+              {
+                "id": "displayName",
+                "value": "Priority"
+              },
               {
                 "id": "mappings",
                 "value": [
                   {
                     "options": {
-                      "critical":   { "color": "dark-red", "index": 0, "text": "CRITICAL" },
-                      "high":       { "color": "red",       "index": 1, "text": "HIGH" },
-                      "medium":     { "color": "orange",    "index": 2, "text": "MEDIUM" },
-                      "low":        { "color": "yellow",    "index": 3, "text": "LOW" },
-                      "negligible": { "color": "green",     "index": 4, "text": "NEGLIGIBLE" },
-                      "unknown":    { "color": "text",      "index": 5, "text": "UNKNOWN" }
+                      "critical": {
+                        "color": "dark-red",
+                        "index": 0,
+                        "text": "CRITICAL"
+                      },
+                      "high": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "HIGH"
+                      },
+                      "medium": {
+                        "color": "orange",
+                        "index": 2,
+                        "text": "MEDIUM"
+                      },
+                      "low": {
+                        "color": "yellow",
+                        "index": 3,
+                        "text": "LOW"
+                      },
+                      "negligible": {
+                        "color": "green",
+                        "index": 4,
+                        "text": "NEGLIGIBLE"
+                      },
+                      "unknown": {
+                        "color": "text",
+                        "index": 5,
+                        "text": "UNKNOWN"
+                      }
                     },
                     "type": "value"
                   }
                 ]
               },
-              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "count" },
-            "properties": [{ "id": "displayName", "value": "Packages" }]
+            "matcher": {
+              "id": "byName",
+              "options": "count"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Packages"
+              }
+            ]
           }
         ]
       },
-      "gridPos": { "h": 12, "w": 6, "x": 18, "y": 6 },
+      "gridPos": {
+        "h": 12,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
       "id": 6,
       "options": {
         "cellHeight": "md",
-        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true,
         "sortBy": []
       },
       "pluginVersion": "10.4.0",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -409,123 +758,278 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
       "id": 102,
       "title": "All Pending Packages — Browse",
       "type": "row"
     },
     {
-      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "patchgov"
+      },
       "description": "Every pending package (security + regular) from each host's latest scan. Repeats per host when All is selected.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {
             "align": "auto",
-            "cellOptions": { "type": "auto" },
+            "cellOptions": {
+              "type": "auto"
+            },
             "filterable": true,
             "inspect": false
           },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "green", "value": null }]
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "hostname" },
-            "properties": [{ "id": "displayName", "value": "Hostname" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "env_name" },
-            "properties": [{ "id": "displayName", "value": "Environment" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "tier_label" },
-            "properties": [{ "id": "displayName", "value": "Category" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "package_name" },
-            "properties": [{ "id": "displayName", "value": "Package" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "current_version" },
-            "properties": [{ "id": "displayName", "value": "Current Version" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "new_version" },
-            "properties": [{ "id": "displayName", "value": "New Version" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "is_security" },
+            "matcher": {
+              "id": "byName",
+              "options": "hostname"
+            },
             "properties": [
-              { "id": "displayName", "value": "Security" },
+              {
+                "id": "displayName",
+                "value": "Hostname"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "env_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Environment"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tier_label"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Category"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "package_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Package"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "current_version"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Current Version"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "new_version"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "New Version"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "is_security"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Security"
+              },
               {
                 "id": "mappings",
                 "value": [
                   {
                     "options": {
-                      "true":  { "color": "red",   "index": 0, "text": "YES" },
-                      "false": { "color": "text",  "index": 1, "text": "-" }
+                      "true": {
+                        "color": "red",
+                        "index": 0,
+                        "text": "YES"
+                      },
+                      "false": {
+                        "color": "text",
+                        "index": 1,
+                        "text": "-"
+                      }
                     },
                     "type": "value"
                   }
                 ]
               },
-              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "cve_id" },
-            "properties": [{ "id": "displayName", "value": "CVE" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "cve_priority" },
-            "properties": [{ "id": "displayName", "value": "CVE Priority" }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "cvss_score" },
+            "matcher": {
+              "id": "byName",
+              "options": "cve_id"
+            },
             "properties": [
-              { "id": "displayName", "value": "CVSS" },
-              { "id": "decimals", "value": 1 },
+              {
+                "id": "displayName",
+                "value": "CVE"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cve_priority"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "CVE Priority"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cvss_score"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "CVSS"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "green",  "value": null },
-                    { "color": "yellow", "value": 4 },
-                    { "color": "orange", "value": 7 },
-                    { "color": "red",    "value": 9 }
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 4
+                    },
+                    {
+                      "color": "orange",
+                      "value": 7
+                    },
+                    {
+                      "color": "red",
+                      "value": 9
+                    }
                   ]
                 }
               },
-              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "scan_timestamp" },
+            "matcher": {
+              "id": "byName",
+              "options": "scan_timestamp"
+            },
             "properties": [
-              { "id": "displayName", "value": "Last Scan" },
-              { "id": "unit", "value": "dateTimeFromNow" }
+              {
+                "id": "displayName",
+                "value": "Last Scan"
+              },
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
             ]
           }
         ]
       },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 19 },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
       "id": 7,
       "options": {
         "cellHeight": "sm",
-        "footer": { "countRows": true, "fields": "", "reducer": ["count"], "show": true },
+        "footer": {
+          "countRows": true,
+          "fields": "",
+          "reducer": [
+            "count"
+          ],
+          "show": true
+        },
         "showHeader": true,
-        "sortBy": [{ "desc": true, "displayName": "CVSS" }]
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "CVSS"
+          }
+        ]
       },
       "pluginVersion": "10.4.0",
       "repeat": "hostname",
       "repeatDirection": "v",
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "patchgov"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -539,12 +1043,24 @@
   ],
   "refresh": "15m",
   "schemaVersion": 39,
-  "tags": ["patching", "packages", "upgrades", "fleet"],
+  "tags": [
+    "patching",
+    "packages",
+    "upgrades",
+    "fleet"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
-        "datasource": { "type": "postgres", "uid": "patchgov" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "postgres",
+          "uid": "patchgov"
+        },
         "definition": "SELECT DISTINCT env_name FROM scan_results ORDER BY 1",
         "description": "Filter by environment.",
         "hide": 0,
@@ -561,7 +1077,10 @@
       },
       {
         "current": {},
-        "datasource": { "type": "postgres", "uid": "patchgov" },
+        "datasource": {
+          "type": "postgres",
+          "uid": "patchgov"
+        },
         "definition": "SELECT DISTINCT hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY 1",
         "description": "Filter by host. When 'All' is selected, each host gets its own tab via panel repeat.",
         "hide": 2,
@@ -602,9 +1121,20 @@
       }
     ]
   },
-  "time": { "from": "now-7d", "to": "now" },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "timepicker": {
-    "refresh_intervals": ["5m", "15m", "30m", "1h", "6h", "12h", "1d"]
+    "refresh_intervals": [
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "6h",
+      "12h",
+      "1d"
+    ]
   },
   "timezone": "utc",
   "title": "Patch Governance | Package Upgrades",
