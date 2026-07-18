@@ -105,10 +105,34 @@ services:
       timeout: 5s
       retries: 5
 
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: patchops-grafana
+    hostname: patchops-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: patchops
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/patch-ops.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - ansible-lab-net
+    depends_on:
+      govdb:
+        condition: service_healthy
+
 volumes:
   aptly-data:
   aptly-gnupg:
   govdb-data:
+  grafana-data:
   ubuntu1-home:
   ubuntu1-data:
   ubuntu2-home:

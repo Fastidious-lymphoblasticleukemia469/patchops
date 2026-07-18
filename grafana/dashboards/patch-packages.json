@@ -1,0 +1,613 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Every package available for upgrade, host by host, from the latest scan. Drill-down companion to Fleet & Snapshots.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": false,
+      "tags": ["patching"],
+      "title": "Fleet & Snapshots",
+      "tooltip": "Current patch state and snapshot promotion status",
+      "type": "dashboard",
+      "url": "/d/patch-ops"
+    },
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": false,
+      "tags": ["patching"],
+      "title": "Patch History",
+      "tooltip": "Audit log of patches applied to hosts",
+      "type": "dashboard",
+      "url": "/d/patch-history"
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Action Required — Security Risk",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Highest CVSS score among pending security packages matching current filters.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 4 },
+              { "color": "orange", "value": 7 },
+              { "color": "red",    "value": 9 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COALESCE(MAX(spd.cvss_score), 0) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority})",
+          "refId": "A"
+        }
+      ],
+      "title": "Highest CVSS (Filtered)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Pending packages that carry a known CVE, matching the current severity filter.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red",    "value": 20 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(*) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority})",
+          "refId": "A"
+        }
+      ],
+      "title": "CVE Packages Pending (Filtered)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Distinct hosts carrying at least one pending CVE matching the current severity filter.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red",    "value": 5 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(DISTINCT spd.hostname) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority})",
+          "refId": "A"
+        }
+      ],
+      "title": "Hosts With Pending CVEs",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Every pending package (security + regular) across the current scope.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "#5794F2", "mode": "fixed" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "#5794F2", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(*) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname})",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Pending Packages (Fleet)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "Security — CVEs Pending",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Every pending package with a known CVE, worst first.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "hostname" },
+            "properties": [{ "id": "displayName", "value": "Hostname" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "env_name" },
+            "properties": [{ "id": "displayName", "value": "Environment" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "package_name" },
+            "properties": [{ "id": "displayName", "value": "Package" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "current_version" },
+            "properties": [{ "id": "displayName", "value": "Current Version" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "new_version" },
+            "properties": [{ "id": "displayName", "value": "New Version" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cve_id" },
+            "properties": [{ "id": "displayName", "value": "CVE" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cve_priority" },
+            "properties": [
+              { "id": "displayName", "value": "Priority" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "critical":   { "color": "dark-red", "index": 0, "text": "CRITICAL" },
+                      "high":       { "color": "red",       "index": 1, "text": "HIGH" },
+                      "medium":     { "color": "orange",    "index": 2, "text": "MEDIUM" },
+                      "low":        { "color": "yellow",    "index": 3, "text": "LOW" },
+                      "negligible": { "color": "green",     "index": 4, "text": "NEGLIGIBLE" },
+                      "unknown":    { "color": "text",      "index": 5, "text": "UNKNOWN" }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cvss_score" },
+            "properties": [
+              { "id": "displayName", "value": "CVSS" },
+              { "id": "decimals", "value": 1 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green",  "value": null },
+                    { "color": "yellow", "value": 4 },
+                    { "color": "orange", "value": 7 },
+                    { "color": "red",    "value": 9 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "scan_timestamp" },
+            "properties": [
+              { "id": "displayName", "value": "Last Scan" },
+              { "id": "unit", "value": "dateTimeFromNow" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 12, "w": 18, "x": 0, "y": 6 },
+      "id": 5,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": true, "fields": "", "reducer": ["count"], "show": true },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "CVSS" }]
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT spd.hostname, spd.env_name, spd.package_name, spd.current_version, spd.new_version, COALESCE(spd.cve_id, '-') AS cve_id, COALESCE(spd.cve_priority, 'unknown') AS cve_priority, spd.cvss_score, spd.scan_timestamp FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority}) ORDER BY spd.cvss_score DESC, spd.hostname, spd.package_name",
+          "refId": "A"
+        }
+      ],
+      "title": "Security Packages — CVE Detail",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Pending CVE packages grouped by severity, worst first.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "center",
+            "cellOptions": { "type": "auto" },
+            "filterable": false,
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "cve_priority" },
+            "properties": [
+              { "id": "displayName", "value": "Priority" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "critical":   { "color": "dark-red", "index": 0, "text": "CRITICAL" },
+                      "high":       { "color": "red",       "index": 1, "text": "HIGH" },
+                      "medium":     { "color": "orange",    "index": 2, "text": "MEDIUM" },
+                      "low":        { "color": "yellow",    "index": 3, "text": "LOW" },
+                      "negligible": { "color": "green",     "index": 4, "text": "NEGLIGIBLE" },
+                      "unknown":    { "color": "text",      "index": 5, "text": "UNKNOWN" }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "count" },
+            "properties": [{ "id": "displayName", "value": "Packages" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 12, "w": 6, "x": 18, "y": 6 },
+      "id": 6,
+      "options": {
+        "cellHeight": "md",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT spd.cve_priority, COUNT(*) AS count FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority}) GROUP BY spd.cve_priority ORDER BY CASE spd.cve_priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 WHEN 'negligible' THEN 5 ELSE 6 END",
+          "refId": "A"
+        }
+      ],
+      "title": "CVE Severity Distribution",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 102,
+      "title": "All Pending Packages — Browse",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "patchgov" },
+      "description": "Every pending package (security + regular) from each host's latest scan. Repeats per host when All is selected.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "hostname" },
+            "properties": [{ "id": "displayName", "value": "Hostname" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "env_name" },
+            "properties": [{ "id": "displayName", "value": "Environment" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "tier_label" },
+            "properties": [{ "id": "displayName", "value": "Category" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "package_name" },
+            "properties": [{ "id": "displayName", "value": "Package" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "current_version" },
+            "properties": [{ "id": "displayName", "value": "Current Version" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "new_version" },
+            "properties": [{ "id": "displayName", "value": "New Version" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "is_security" },
+            "properties": [
+              { "id": "displayName", "value": "Security" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "true":  { "color": "red",   "index": 0, "text": "YES" },
+                      "false": { "color": "text",  "index": 1, "text": "-" }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cve_id" },
+            "properties": [{ "id": "displayName", "value": "CVE" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cve_priority" },
+            "properties": [{ "id": "displayName", "value": "CVE Priority" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "cvss_score" },
+            "properties": [
+              { "id": "displayName", "value": "CVSS" },
+              { "id": "decimals", "value": 1 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green",  "value": null },
+                    { "color": "yellow", "value": 4 },
+                    { "color": "orange", "value": 7 },
+                    { "color": "red",    "value": 9 }
+                  ]
+                }
+              },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "scan_timestamp" },
+            "properties": [
+              { "id": "displayName", "value": "Last Scan" },
+              { "id": "unit", "value": "dateTimeFromNow" }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 19 },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": true, "fields": "", "reducer": ["count"], "show": true },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "CVSS" }]
+      },
+      "pluginVersion": "10.4.0",
+      "repeat": "hostname",
+      "repeatDirection": "v",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "patchgov" },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE hostname = ${hostname} ORDER BY hostname, scan_timestamp DESC) SELECT spd.hostname, spd.env_name, spd.tier_label, spd.package_name, spd.current_version, spd.new_version, spd.is_security::text, COALESCE(spd.cve_id, '-') AS cve_id, COALESCE(spd.cve_priority, '-') AS cve_priority, spd.cvss_score, spd.scan_timestamp FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE spd.tier_label IN (${category}) ORDER BY spd.cvss_score DESC, spd.hostname, spd.tier_label, spd.package_name",
+          "refId": "A"
+        }
+      ],
+      "title": "All Pending Packages",
+      "type": "table"
+    }
+  ],
+  "refresh": "15m",
+  "schemaVersion": 39,
+  "tags": ["patching", "packages", "upgrades", "fleet"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": { "type": "postgres", "uid": "patchgov" },
+        "definition": "SELECT DISTINCT env_name FROM scan_results ORDER BY 1",
+        "description": "Filter by environment.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Environment",
+        "multi": true,
+        "name": "env",
+        "options": [],
+        "query": "SELECT DISTINCT env_name FROM scan_results ORDER BY 1",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "postgres", "uid": "patchgov" },
+        "definition": "SELECT DISTINCT hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY 1",
+        "description": "Filter by host. When 'All' is selected, each host gets its own tab via panel repeat.",
+        "hide": 2,
+        "includeAll": true,
+        "label": "Host",
+        "multi": true,
+        "name": "hostname",
+        "options": [],
+        "query": "SELECT DISTINCT hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY 1",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "description": "Drills the Security section. Independent from Category below.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "CVE Severity",
+        "multi": true,
+        "name": "cve_priority",
+        "options": [],
+        "query": "critical,high,medium,low,negligible,unknown",
+        "type": "custom"
+      },
+      {
+        "current": {},
+        "description": "Drills the All Pending Packages browse table.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Category",
+        "multi": true,
+        "name": "category",
+        "options": [],
+        "query": "Security Update,Recommended Update,Kernel Update,Runtime Update",
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5m", "15m", "30m", "1h", "6h", "12h", "1d"]
+  },
+  "timezone": "utc",
+  "title": "Patch Governance | Package Upgrades",
+  "uid": "patch-packages",
+  "version": 1
+}
