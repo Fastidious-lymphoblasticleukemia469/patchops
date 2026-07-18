@@ -1,0 +1,119 @@
+---
+# notify — Send email notification, write audit log, update governance DB
+# Shared role used by both scan and patch playbooks.
+#
+# Required vars from calling playbook:
+#   notify_subject  — email subject line
+#   notify_body     — plain text report body
+#
+# Optional vars:
+#   is_scan_only    — true = skip audit log + governance DB (default: false)
+#   notify_patch_status — success | failed (for patch notifications)
+#   hostvars entries    — hostname, env_name, patch_type, packages_changed, etc.
+
+# ── Step 1: Send email ──────────────────────────────────────────────
+- name: Send notification email
+  community.general.mail:
+    host: "{{ notify_smtp_host }}"
+    port: "{{ notify_smtp_port }}"
+    username: "{{ notify_smtp_username }}"
+    password: "{{ notify_smtp_password }}"
+    to: "{{ notify_email_to }}"
+    from: "{{ notify_email_from }}"
+    subject: "{{ notify_subject }}"
+    body: "{{ notify_body }}"
+    subtype: plain
+    secure: starttls
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: mail_result
+  ignore_errors: true
+
+- name: Report email status
+  ansible.builtin.debug:
+    msg: >
+      {{ 'Email sent successfully' if mail_result is succeeded else
+         'Email failed: ' + (mail_result.msg | default('unknown error')) }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+# ── Step 2: Write audit log (skip for scans) ────────────────────────
+- name: Ensure audit log directory exists
+  ansible.builtin.file:
+    path: "{{ notify_audit_log_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: not is_scan_only
+
+- name: Write audit log entry
+  ansible.builtin.lineinfile:
+    path: "{{ notify_audit_log_file }}"
+    line: "{{ audit_entry | to_json }}"
+    create: true
+    mode: "0644"
+  vars:
+    audit_entry:
+      timestamp: "{{ ansible_date_time.iso8601 }}"
+      hostname: "{{ inventory_hostname }}"
+      env_name: "{{ aptly_env | default('unknown') }}"
+      patch_type: "{{ patch_type | default('unknown') }}"
+      status: "{{ notify_patch_status | default('unknown') }}"
+      packages_changed: "{{ packages_changed | default(0) }}"
+      snapshot_used: "{{ snapshot_used | default('none') }}"
+      operator: "{{ lookup('env', 'USER') | default('ansible', true) }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when:
+    - not is_scan_only
+    - patch_type is defined
+  ignore_errors: true
+
+# ── Step 3: Insert into governance DB (skip for scans) ──────────────
+- name: Insert patch record into governance DB
+  community.postgresql.postgresql_query:
+    db: "{{ patch_governance_db_name }}"
+    login_host: "{{ patch_governance_db_host }}"
+    login_port: "{{ patch_governance_db_port }}"
+    login_user: "{{ patch_governance_db_user }}"
+    login_password: "{{ patch_governance_db_password }}"
+    query: >
+      INSERT INTO patch_history
+        (hostname, env_name, patch_timestamp, patch_type, snapshot_used,
+         packages_changed, operator, status, reboot_done, packages_detail)
+      VALUES
+        (%s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s::jsonb)
+    positional_args:
+      - "{{ inventory_hostname }}"
+      - "{{ aptly_env | default('unknown') }}"
+      - "{{ patch_type | default('unknown') }}"
+      - "{{ snapshot_used | default('none') }}"
+      - "{{ packages_changed | default(0) }}"
+      - "{{ lookup('env', 'USER') | default('ansible', true) }}"
+      - "{{ notify_patch_status | default('unknown') }}"
+      - "{{ reboot_done | default(false) }}"
+      - "{{ packages_detail | default('{}') }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when:
+    - not is_scan_only
+    - patch_governance_db_enabled | bool
+    - patch_type is defined
+  ignore_errors: true
+  register: db_insert
+
+- name: Warn if governance DB insert failed
+  ansible.builtin.debug:
+    msg: "WARNING: Could not insert into patch_history. DB may be unavailable."
+  when:
+    - db_insert is defined
+    - db_insert is failed
+  delegate_to: localhost
+  run_once: true
+  become: false

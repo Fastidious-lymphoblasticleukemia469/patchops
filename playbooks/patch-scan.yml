@@ -1,0 +1,199 @@
+---
+# patch-scan.yml — Security scan + notification
+# 1. Gather package facts from all ubuntu hosts
+# 2. Classify packages into risk tiers
+# 3. Build ASCII report
+# 4. Send email notification
+# 5. Record scan results in governance DB
+# 6. Prune old scan results (retention window)
+#
+# Usage:
+#   ansible-playbook playbooks/patch-scan.yml
+#   ansible-playbook playbooks/patch-scan.yml -e "aptly_env=dev"
+#
+# Environment variables:
+#   SMTP_USERNAME — Gmail address for SMTP auth
+#   SMTP_PASSWORD — Gmail app password
+
+- name: Security scan and notification
+  hosts: ubuntu
+  become: true
+  gather_facts: true
+  vars:
+    aptly_env: "{{ group_names | first }}"
+    govdb_host: localhost
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    govdb_password: patchops_govdb_pass
+    scan_retention_days: 7
+
+  tasks:
+    # ── Gather package facts ─────────────────────────────────────
+    - name: Check for available upgrades
+      ansible.builtin.shell: |
+        apt-get update -qq 2>/dev/null
+        apt list --upgradable 2>/dev/null | tail -n +2 | head -100
+      register: upgrades_raw
+      changed_when: false
+
+    - name: Parse upgrade list
+      ansible.builtin.set_fact:
+        upgrade_lines: "{{ upgrades_raw.stdout_lines | default([]) }}"
+
+    - name: Classify packages
+      ansible.builtin.set_fact:
+        security_packages: "{{ upgrade_lines | select('match', '.*security.*') | list }}"
+        regular_packages: "{{ upgrade_lines | reject('match', '.*security.*') | list }}"
+        security_count: "{{ upgrade_lines | select('match', '.*security.*') | list | length }}"
+        regular_count: "{{ upgrade_lines | reject('match', '.*security.*') | list | length }}"
+        total_upgrades: "{{ upgrade_lines | length }}"
+
+    - name: Check reboot required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_stat
+
+    - name: Set reboot fact
+      ansible.builtin.set_fact:
+        reboot_required: "{{ reboot_stat.stat.exists | default(false) }}"
+
+    - name: Calculate risk score
+      ansible.builtin.set_fact:
+        risk_score: >-
+          {{ [10, (security_count | int * 3 + regular_count | int * 1 + (15 if reboot_required | bool else 0))] | min }}
+        risk_tier: >-
+          {{ 'Critical' if (security_count | int > 5 or reboot_required | bool and security_count | int > 2) else
+             'High' if (security_count | int > 2) else
+             'Medium' if (security_count | int > 0 or total_upgrades | int > 10) else
+             'Low' }}
+
+    # ── Record per-host results ──────────────────────────────────
+    - name: Store host scan result
+      ansible.builtin.set_fact:
+        host_scan_result:
+          hostname: "{{ inventory_hostname }}"
+          env_name: "{{ aptly_env }}"
+          risk_tier: "{{ risk_tier }}"
+          risk_score: "{{ risk_score }}"
+          security_count: "{{ security_count }}"
+          regular_count: "{{ regular_count }}"
+          total_upgrades: "{{ total_upgrades }}"
+          reboot_required: "{{ reboot_required }}"
+
+    - name: Debug host result
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ risk_tier }} ({{ risk_score }}) — {{ security_count }} sec, {{ regular_count }} reg, reboot={{ reboot_required }}"
+
+  # ── Aggregation and notification (runs once on localhost) ──────
+  post_tasks:
+    - name: Aggregate results from all hosts
+      ansible.builtin.set_fact:
+        all_host_results: "{{ groups['ubuntu'] | map('extract', hostvars, 'host_scan_result') | select('defined') | list }}"
+
+    - name: Count risk tiers
+      ansible.builtin.set_fact:
+        critical_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'Critical') | list }}"
+        high_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'High') | list }}"
+        medium_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'Medium') | list }}"
+        low_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'Low') | list }}"
+        hosts_needing_reboot: "{{ all_host_results | selectattr('reboot_required', 'equalto', true) | list }}"
+        hosts_needing_action: "{{ all_host_results | selectattr('total_upgrades', 'gt', 0) | list }}"
+
+    - name: Build scan report
+      ansible.builtin.set_fact:
+        scan_report: |
+          PATCH SCAN REPORT
+          =================
+          Date:      {{ ansible_date_time.iso8601 }}
+          Env:       {{ aptly_env }}
+          Hosts:     {{ all_host_results | length }} scanned
+          Action:    {{ hosts_needing_action | length }} need action
+          Reboot:    {{ hosts_needing_reboot | length }} need reboot
+
+          HOST                RISK      SEC   REG   ALL   REBOOT
+          {% for h in all_host_results | sort(attribute='risk_score') | reverse %}
+          {{ '%-20s' | format(h.hostname) }}{{ '%-10s' | format(h.risk_tier) }}{{ '%-6s' | format(h.security_count) }}{{ '%-6s' | format(h.regular_count) }}{{ '%-6s' | format(h.total_upgrades) }}{{ h.reboot_required }}
+          {% endfor %}
+
+          Summary:
+            Critical: {{ critical_hosts | length }}
+            High:     {{ high_hosts | length }}
+            Medium:   {{ medium_hosts | length }}
+            Low:      {{ low_hosts | length }}
+        email_subject: "PATCH SCAN | {{ ansible_date_time.date }} | {{ aptly_env }} | {{ hosts_needing_action | length }}/{{ all_host_results | length }} need action | {{ hosts_needing_reboot | length }} need reboot"
+
+    - name: Display scan report
+      ansible.builtin.debug:
+        msg: "{{ scan_report }}"
+
+    # ── Send notification ────────────────────────────────────────
+    - name: Send scan notification
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        notify_subject: "{{ email_subject }}"
+        notify_body: "{{ scan_report }}"
+        is_scan_only: true
+
+    # ── Record scan results in governance DB ─────────────────────
+    - name: Insert scan results into governance DB
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          INSERT INTO scan_results
+            (hostname, env_name, scan_timestamp, risk_tier, risk_score,
+             security_count, regular_count, total_upgrades, reboot_required)
+          VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, %s)
+        positional_args:
+          - "{{ item.hostname }}"
+          - "{{ item.env_name }}"
+          - "{{ item.risk_tier }}"
+          - "{{ item.risk_score }}"
+          - "{{ item.security_count }}"
+          - "{{ item.regular_count }}"
+          - "{{ item.total_upgrades }}"
+          - "{{ item.reboot_required }}"
+      loop: "{{ all_host_results }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ignore_errors: true
+      register: scan_db_insert
+
+    - name: Warn if scan DB insert failed
+      ansible.builtin.debug:
+        msg: "WARNING: Could not insert scan results into patchgov. DB may be unavailable."
+      when: scan_db_insert is defined and scan_db_insert is failed
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    # ── Prune old scan results ───────────────────────────────────
+    - name: Prune old scan results ({{ scan_retention_days }} day retention)
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          DELETE FROM scan_results
+          WHERE scan_timestamp < NOW() - make_interval(days => {{ scan_retention_days }})
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ignore_errors: true
+      register: pruned
+
+    - name: Report pruned scan results
+      ansible.builtin.debug:
+        msg: "Pruned {{ pruned.rowcount | default(0) }} old scan_results rows"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: pruned is not failed

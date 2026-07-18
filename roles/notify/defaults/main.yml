@@ -1,0 +1,31 @@
+---
+# Notify role defaults
+# Override via inventory or extra-vars
+
+# Email settings (Gmail SMTP)
+notify_email_to: "100ravsinghkarmwar@gmail.com"
+notify_email_from: "100ravsinghkarmwar@gmail.com"
+notify_smtp_host: "smtp.gmail.com"
+notify_smtp_port: 587
+notify_smtp_username: "{{ lookup('env', 'SMTP_USERNAME') | default('100ravsinghkarmwar@gmail.com', true) }}"
+notify_smtp_password: "{{ lookup('env', 'SMTP_PASSWORD') | default('', true) }}"
+
+# Report content — caller MUST set these via include_role vars
+notify_subject: ""
+notify_body: ""
+
+# Flags
+is_scan_only: false
+notify_patch_status: ""  # success | failed | ""
+
+# Governance DB (for patch notifications)
+patch_governance_db_enabled: true
+patch_governance_db_host: localhost
+patch_governance_db_port: 5433
+patch_governance_db_name: patchgov
+patch_governance_db_user: postgres
+patch_governance_db_password: patchops_govdb_pass
+
+# Audit log
+notify_audit_log_dir: /var/log/patchops
+notify_audit_log_file: "{{ notify_audit_log_dir }}/patch-audit.ndjson"

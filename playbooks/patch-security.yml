@@ -1,0 +1,168 @@
+---
+# patch-security.yml — Apply security patches with rolling deployment
+# 1. Precheck (disk space, connectivity)
+# 2. Apply security patches
+# 3. Handle reboot if needed
+# 4. Validate post-patch
+# 5. Send notification (success or failure)
+# 6. Record in governance DB
+#
+# Usage:
+#   ansible-playbook playbooks/patch-security.yml
+#   ansible-playbook playbooks/patch-security.yml -e "aptly_env=dev snapshot_used=patch-20260718-1010"
+#
+# Rolling deployment:
+#   - serial: 100% (all hosts at once by default, override with -e "deploy_serial=25%")
+#   - max_fail_percentage: 25%
+
+- name: Apply security patches
+  hosts: ubuntu
+  become: true
+  gather_facts: true
+  serial: "{{ deploy_serial | default('100%') }}"
+  max_fail_percentage: 25
+  vars:
+    aptly_env: "{{ group_names | first }}"
+    snapshot_used: "none"
+    patch_type: "security"
+    govdb_host: localhost
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    govdb_password: patchops_govdb_pass
+
+  pre_tasks:
+    # ── Precheck ─────────────────────────────────────────────────
+    - name: Check disk space
+      ansible.builtin.shell: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+      register: disk_usage
+      changed_when: false
+
+    - name: Fail if disk usage > 90%
+      ansible.builtin.fail:
+        msg: "Disk usage is {{ disk_usage.stdout }}% — too risky to patch"
+      when: disk_usage.stdout | int > 90
+
+    - name: Verify apt connectivity
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 300
+
+  tasks:
+    # ── Apply security patches ───────────────────────────────────
+    - name: Apply security-only upgrades
+      ansible.builtin.apt:
+        upgrade: security
+        update_cache: true
+        cache_valid_time: 300
+      register: patch_result
+
+    - name: Set patch facts
+      ansible.builtin.set_fact:
+        packages_changed: "{{ patch_result.changed | default(false) }}"
+        packages_detail: "{{ patch_result.stdout_lines | default([]) }}"
+
+    - name: Check if reboot is needed
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_check
+
+    - name: Set reboot fact
+      ansible.builtin.set_fact:
+        reboot_needed: "{{ reboot_check.stat.exists | default(false) }}"
+
+    # ── Reboot if needed ─────────────────────────────────────────
+    - name: Reboot server
+      ansible.builtin.reboot:
+        reboot_timeout: 300
+      when: reboot_needed | bool
+      register: reboot_result
+
+    - name: Wait for host to come back
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 300
+      when: reboot_needed | bool
+
+    # ── Validate post-patch ──────────────────────────────────────
+    - name: Verify SSH is working
+      ansible.builtin.ping:
+
+    - name: Check for remaining upgrades
+      ansible.builtin.shell: apt list --upgradable 2>/dev/null | tail -n +2 | wc -l
+      register: remaining
+      changed_when: false
+
+    - name: Display remaining upgrades
+      ansible.builtin.debug:
+        msg: "Remaining upgrades: {{ remaining.stdout }}"
+
+    # ── Store result for post_tasks ──────────────────────────────
+    - name: Store host patch result
+      ansible.builtin.set_fact:
+        host_patch_result:
+          hostname: "{{ inventory_hostname }}"
+          env_name: "{{ aptly_env }}"
+          patch_type: "{{ patch_type }}"
+          status: success
+          packages_changed: "{{ patch_result.changed | default(false) }}"
+          reboot_done: "{{ reboot_needed | default(false) }}"
+          snapshot_used: "{{ snapshot_used }}"
+
+  # ── Success notification ──────────────────────────────────────
+  post_tasks:
+    - name: Build success report
+      ansible.builtin.set_fact:
+        success_report: |
+          PATCH COMPLETE
+          ==============
+          Host:      {{ inventory_hostname }}
+          Env:       {{ aptly_env }}
+          Status:    SUCCESS
+          Snapshot:  {{ snapshot_used }}
+          Rebooted:  {{ reboot_needed | default(false) }}
+          Remaining: {{ remaining.stdout }} upgrades left
+        email_subject: "PATCH OK | {{ aptly_env }} | {{ inventory_hostname }} | {{ patch_type }}"
+
+    - name: Send success notification
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        notify_subject: "{{ email_subject }}"
+        notify_body: "{{ success_report }}"
+        notify_patch_status: success
+        patch_type: "{{ patch_type }}"
+        packages_changed: "{{ host_patch_result.packages_changed }}"
+        snapshot_used: "{{ snapshot_used }}"
+        reboot_done: "{{ host_patch_result.reboot_done }}"
+
+  # ── Failure handler ──────────────────────────────────────────
+  rescue:
+    - name: Build failure report
+      ansible.builtin.set_fact:
+        failure_report: |
+          PATCH FAILED
+          ============
+          Host:    {{ inventory_hostname }}
+          Env:     {{ aptly_env }}
+          Status:  FAILED
+          Snapshot: {{ snapshot_used }}
+          Failed task: {{ ansible_failed_task.name | default('unknown') }}
+          Error: {{ ansible_failed_result.msg | default('unknown') }}
+        email_subject: "PATCH FAILED | {{ aptly_env }} | {{ inventory_hostname }} | {{ patch_type }}"
+
+    - name: Send failure notification
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        notify_subject: "{{ email_subject }}"
+        notify_body: "{{ failure_report }}"
+        notify_patch_status: failed
+        patch_type: "{{ patch_type }}"
+        packages_changed: 0
+        snapshot_used: "{{ snapshot_used }}"
+        reboot_done: false
+
+    - name: Fail the play
+      ansible.builtin.fail:
+        msg: "Patching failed on {{ inventory_hostname }}. Notification sent."

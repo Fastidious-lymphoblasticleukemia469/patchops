@@ -15,7 +15,6 @@ docker compose up -d
 
 echo ""
 echo "=== Starting PatchOps Lab (aptly + servers) ==="
-docker compose -f compose.lab.yml build
 docker compose -f compose.lab.yml up -d
 
 # Wait for SSH
