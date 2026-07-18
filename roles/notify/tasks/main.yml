@@ -93,7 +93,7 @@
       - "{{ aptly_env | default('unknown') }}"
       - "{{ patch_type | default('unknown') }}"
       - "{{ snapshot_used | default('none') }}"
-      - "{{ packages_changed | default(0) }}"
+      - "{{ packages_changed | default(0) | int }}"
       - "{{ lookup('env', 'USER') | default('ansible', true) }}"
       - "{{ notify_patch_status | default('unknown') }}"
       - "{{ reboot_done | default(false) }}"

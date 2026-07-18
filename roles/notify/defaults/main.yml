@@ -7,8 +7,8 @@ notify_email_to: "100ravsinghkarmwar@gmail.com"
 notify_email_from: "100ravsinghkarmwar@gmail.com"
 notify_smtp_host: "smtp.gmail.com"
 notify_smtp_port: 587
-notify_smtp_username: "{{ lookup('env', 'SMTP_USERNAME') | default('100ravsinghkarmwar@gmail.com', true) }}"
-notify_smtp_password: "{{ lookup('env', 'SMTP_PASSWORD') | default('', true) }}"
+notify_smtp_username: "{{ (lookup('env', 'SMTP_USERNAME') | length > 0) | ternary(lookup('env', 'SMTP_USERNAME'), '100ravsinghkarmwar@gmail.com') }}"
+notify_smtp_password: "{{ (lookup('env', 'SMTP_PASSWORD') | length > 0) | ternary(lookup('env', 'SMTP_PASSWORD'), '') }}"
 
 # Report content — caller MUST set these via include_role vars
 notify_subject: ""
@@ -27,5 +27,5 @@ patch_governance_db_user: postgres
 patch_governance_db_password: patchops_govdb_pass
 
 # Audit log
-notify_audit_log_dir: /var/log/patchops
+notify_audit_log_dir: "~/.local/share/patchops"
 notify_audit_log_file: "{{ notify_audit_log_dir }}/patch-audit.ndjson"
