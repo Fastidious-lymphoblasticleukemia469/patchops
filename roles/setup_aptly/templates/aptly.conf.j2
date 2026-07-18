@@ -1,0 +1,12 @@
+{
+  "rootDir": "{{ aptly_data }}",
+  "dbDir": "{{ aptly_data }}/db",
+  "poolDir": "{{ aptly_data }}/pool",
+  "publicDir": "{{ aptly_data }}/public",
+  "architectures": {{ aptly_architectures | to_json }},
+  "downloadSpeed": {{ aptly_download_speed }},
+  "downloadTimeout": "{{ aptly_download_timeout }}",
+  "downloadRetries": {{ aptly_download_retries }},
+  "parallelFlushWorkers": {{ aptly_parallel_workers }},
+  "apiServer": { "enable": {{ aptly_api_enable | to_json }}, "listen": "{{ aptly_api_listen }}" }
+}

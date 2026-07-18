@@ -42,6 +42,27 @@ services:
       govdb:
         condition: service_healthy
 
+  smtp:
+    image: rnwood/smtp4dev:v3
+    container_name: patchops-smtp
+    hostname: patchops-smtp
+    ports:
+      - "5000:80"    # Web UI
+      - "2525:25"    # SMTP (non-standard port, safe on dev machines)
+    environment:
+      ServerOptions__BasePath: /
+      SmtpOptions__EnableAuthentication: "false"
+      SmtpOptions__AllowRemoteConnection: "true"
+      DatabaseOptions__DatabaseType: SQLite
+    volumes:
+      - smtp-data:/app/db
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/ -o /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   govdb-data:
   grafana-data:
+  smtp-data:

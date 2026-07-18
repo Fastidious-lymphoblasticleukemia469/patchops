@@ -1,0 +1,44 @@
+---
+# Aptly mirror server configuration
+# Override via inventory or environment variables
+
+aptly_user: aptly
+aptly_uid: 115
+aptly_group: aptly
+aptly_gid: 115
+aptly_home: /home/aptly
+aptly_data: /var/cache/aptly
+aptly_config: /etc/aptly/aptly.conf
+
+# GPG
+aptly_gpg_key_name: "PatchOps Aptly"
+aptly_gpg_key_email: "aptly@patchops.internal"
+aptly_gnupg_dir: "{{ aptly_home }}/.gnupg"
+
+# Architectures to mirror
+aptly_architectures:
+  - amd64
+
+# Download settings
+aptly_download_speed: 0
+aptly_download_timeout: "300s"
+aptly_download_retries: 3
+aptly_parallel_workers: 2
+
+# API server
+aptly_api_enable: true
+aptly_api_listen: ":8080"
+
+# GPG keys to import for mirror verification
+aptly_third_party_keys:
+  - "2FD21310B49F6B46"   # Docker
+  - "7EA0A9C3F273FCD8"   # NodeSource
+  - "6F71F525282841EEDAF851B42F59B5F99B1BE0B4"  # Nginx
+
+# SSH key (mounted from host)
+aptly_ssh_key_src: /tmp/ssh_key.pub
+
+# Notify settings
+smtp_host: patchops-smtp
+smtp_port: 2525
+notify_email: patchops@localhost

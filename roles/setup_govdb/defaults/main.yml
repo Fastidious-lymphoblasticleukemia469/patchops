@@ -2,7 +2,7 @@
 # PostgreSQL governance database configuration
 # Override via inventory or environment variables
 
-patch_governance_db_host: patchops-govdb
+patch_governance_db_host: localhost
 patch_governance_db_port: 5433
 patch_governance_db_name: patchgov
 patch_governance_db_user: postgres

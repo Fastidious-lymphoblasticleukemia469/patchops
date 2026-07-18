@@ -1,0 +1,84 @@
+---
+# notify-scan.yml — Send email notification after mirror scan
+# Queries govdb for latest scan results and sends a summary via SMTP.
+# Usage: ansible-playbook playbooks/notify-scan.yml
+
+- name: Send scan completion notification
+  hosts: localhost
+  gather_facts: false
+  vars:
+    smtp_host: localhost
+    smtp_port: 2525
+    smtp_from: patchops@localhost
+    smtp_to: patchops@localhost
+    scan_hostname: "{{ lookup('env', 'SCAN_HOSTNAME') | default('unknown', true) }}"
+    scan_env: "{{ lookup('env', 'SCAN_ENV') | default('unknown', true) }}"
+    scan_summary: "{{ lookup('env', 'SCAN_SUMMARY') | default('No summary provided', true) }}"
+    scan_timestamp: "{{ lookup('env', 'SCAN_TIMESTAMP') | default(ansible_date_time.iso8601 | default('now', true), true) }}"
+
+  tasks:
+    - name: Query latest scan from govdb
+      community.postgresql.postgresql_query:
+        db: patchgov
+        login_host: localhost
+        login_port: 5433
+        login_user: postgres
+        login_password: patchops_govdb_pass
+        query: |
+          SELECT hostname, env_name, scan_timestamp, risk_tier, risk_score,
+                 cve_count, max_cvss, total_upgrades, reboot_required
+          FROM scan_results
+          WHERE hostname = %s
+          ORDER BY scan_timestamp DESC
+          LIMIT 1
+        positional_args:
+          - "{{ scan_hostname }}"
+      register: scan_query
+      when: scan_hostname != 'unknown'
+
+    - name: Set scan facts from DB
+      ansible.builtin.set_fact:
+        scan_risk: "{{ scan_query.query_result[0].risk_tier if scan_query.query_result | length > 0 else 'unknown' }}"
+        scan_risk_score: "{{ scan_query.query_result[0].risk_score if scan_query.query_result | length > 0 else 'N/A' }}"
+        scan_cves: "{{ scan_query.query_result[0].cve_count if scan_query.query_result | length > 0 else 'N/A' }}"
+        scan_max_cvss: "{{ scan_query.query_result[0].max_cvss if scan_query.query_result | length > 0 else 'N/A' }}"
+        scan_total: "{{ scan_query.query_result[0].total_upgrades if scan_query.query_result | length > 0 else 'N/A' }}"
+        scan_reboot: "{{ scan_query.query_result[0].reboot_required if scan_query.query_result | length > 0 else 'unknown' }}"
+      when: scan_hostname != 'unknown'
+
+    - name: Build email body
+      ansible.builtin.set_fact:
+        email_body: |
+          PatchOps Scan Complete
+          =====================
+
+          Host:       {{ scan_hostname }}
+          Environment: {{ scan_env }}
+          Timestamp:  {{ scan_timestamp }}
+
+          Risk Tier:  {{ scan_risk | default(scan_summary, true) }}
+          Risk Score: {{ scan_risk_score | default('N/A', true) }}
+          CVE Count:  {{ scan_cves | default('N/A', true) }}
+          Max CVSS:   {{ scan_max_cvss | default('N/A', true) }}
+          Upgrades:   {{ scan_total | default('N/A', true) }}
+          Reboot:     {{ scan_reboot | default('N/A', true) }}
+
+          --
+          PatchOps Automated Notification
+
+    - name: Send email notification
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        from: "{{ smtp_from }}"
+        to: "{{ smtp_to }}"
+        subject: "[PatchOps] Scan Complete: {{ scan_hostname }} ({{ scan_env }})"
+        body: "{{ email_body }}"
+      register: mail_result
+      ignore_errors: true
+
+    - name: Report notification status
+      ansible.builtin.debug:
+        msg: >
+          {{ 'Email sent successfully' if mail_result is succeeded else
+             'Email failed: ' + (mail_result.msg | default('unknown error')) }}

@@ -1,0 +1,10 @@
+---
+# setup-aptly.yml — Idempotent aptly mirror server setup
+# Runs the setup_aptly role against the aptly host.
+# Usage: ansible-playbook playbooks/setup-aptly.yml
+
+- name: Setup aptly mirror server
+  hosts: aptly
+  become: true
+  roles:
+    - setup_aptly

@@ -1,0 +1,299 @@
+---
+# setup_aptly — Idempotent aptly mirror server setup
+# Replaces the 165-line bash entrypoint with proper Ansible tasks.
+# Can be run against any aptly server (container or bare metal).
+
+# ── Step 1: System packages ─────────────────────────────────────────
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - aptly
+      - gnupg
+      - nginx
+      - openssh-server
+      - sudo
+      - curl
+      - python3-psycopg2
+      - postgresql-client
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure SSH directory exists
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    mode: "0755"
+
+# ── Step 2: Create aptly user ───────────────────────────────────────
+- name: Create aptly group
+  ansible.builtin.group:
+    name: "{{ aptly_group }}"
+    gid: "{{ aptly_gid }}"
+    state: present
+
+- name: Create aptly user
+  ansible.builtin.user:
+    name: "{{ aptly_user }}"
+    uid: "{{ aptly_uid }}"
+    group: "{{ aptly_group }}"
+    shell: /bin/bash
+    home: "{{ aptly_home }}"
+    create_home: true
+    state: present
+
+- name: Add aptly to sudo group
+  ansible.builtin.user:
+    name: "{{ aptly_user }}"
+    groups: sudo
+    append: true
+
+- name: Grant aptly NOPASSWD sudo
+  ansible.builtin.copy:
+    content: "{{ aptly_user }} ALL=(ALL:ALL) NOPASSWD:ALL\n"
+    dest: /etc/sudoers.d/aptly
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+# ── Step 3: Data directory ──────────────────────────────────────────
+- name: Create aptly data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    mode: "0755"
+  loop:
+    - "{{ aptly_data }}"
+    - "{{ aptly_data }}/db"
+    - "{{ aptly_data }}/pool"
+    - "{{ aptly_data }}/public"
+    - "{{ aptly_data }}/state"
+
+# ── Step 4: Aptly configuration ─────────────────────────────────────
+- name: Create aptly config directory
+  ansible.builtin.file:
+    path: /etc/aptly
+    state: directory
+    mode: "0755"
+
+- name: Deploy aptly.conf
+  ansible.builtin.template:
+    src: aptly.conf.j2
+    dest: "{{ aptly_config }}"
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    mode: "0644"
+
+# ── Step 5: SSH setup ───────────────────────────────────────────────
+- name: Create .ssh directory
+  ansible.builtin.file:
+    path: "{{ aptly_home }}/.ssh"
+    state: directory
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    mode: "0700"
+
+- name: Deploy authorized key
+  ansible.builtin.copy:
+    src: "{{ aptly_ssh_key_src }}"
+    dest: "{{ aptly_home }}/.ssh/authorized_keys"
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    mode: "0600"
+    remote_src: true
+  when: aptly_ssh_key_src is file
+
+# ── Step 6: GPG keyring setup ──────────────────────────────────────
+- name: Create GNUPG directory
+  ansible.builtin.file:
+    path: "{{ aptly_gnupg_dir }}"
+    state: directory
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    mode: "0700"
+
+- name: Import Ubuntu archive GPG key
+  ansible.builtin.shell: |
+    gpg --no-default-keyring --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg --export | \
+    gpg --no-default-keyring --keyring {{ aptly_gnupg_dir }}/trustedkeys.gpg --import 2>/dev/null || true
+  args:
+    creates: "{{ aptly_gnupg_dir }}/trustedkeys.gpg"
+  become: true
+  become_user: "{{ aptly_user }}"
+
+- name: Import third-party signing keys
+  ansible.builtin.shell: |
+    gpg --no-default-keyring --keyring {{ aptly_gnupg_dir }}/trustedkeys.gpg \
+        --keyserver keyserver.ubuntu.com --recv-keys {{ aptly_third_party_keys | join(' ') }} 2>/dev/null || true
+  changed_when: false
+  become: true
+  become_user: "{{ aptly_user }}"
+
+- name: Export keys to system keyring for gpgv
+  ansible.builtin.shell: |
+    mkdir -p /etc/apt/trusted.gpg.d
+    gpg --no-default-keyring --keyring {{ aptly_gnupg_dir }}/trustedkeys.gpg --export | \
+        gpg --dearmor | tee /etc/apt/trusted.gpg.d/patchops-keys.gpg > /dev/null
+  args:
+    creates: /etc/apt/trusted.gpg.d/patchops-keys.gpg
+
+# ── Step 7: Generate PatchOps signing key ───────────────────────────
+- name: Check if PatchOps signing key exists
+  ansible.builtin.shell: >
+    gpg --homedir {{ aptly_gnupg_dir }} --list-keys "{{ aptly_gpg_key_name }}" 2>/dev/null
+  register: gpg_key_check
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ aptly_user }}"
+
+- name: Generate PatchOps signing GPG key
+  ansible.builtin.shell: |
+    cat <<'GPG_KEY' | gpg --batch --gen-key --homedir {{ aptly_gnupg_dir }}
+    Key-Type: RSA
+    Key-Length: 4096
+    Name-Real: {{ aptly_gpg_key_name }}
+    Name-Email: {{ aptly_gpg_key_email }}
+    Expire-Date: 0
+    %no-protection
+    %commit
+    GPG_KEY
+  when: gpg_key_check.rc != 0
+  become: true
+  become_user: "{{ aptly_user }}"
+
+- name: Export public key for client download
+  ansible.builtin.shell: >
+    gpg --homedir {{ aptly_gnupg_dir }} --armor --export "{{ aptly_gpg_key_name }}"
+    > {{ aptly_data }}/public/patchops-aptly.gpg
+  args:
+    creates: "{{ aptly_data }}/public/patchops-aptly.gpg"
+  become: true
+  become_user: "{{ aptly_user }}"
+
+- name: Set public key permissions
+  ansible.builtin.file:
+    path: "{{ aptly_data }}/public/patchops-aptly.gpg"
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    mode: "0644"
+
+# ── Step 8: Initialize aptly database ────────────────────────────────
+- name: Initialize aptly database
+  ansible.builtin.command: >
+    aptly -config={{ aptly_config }} db recover
+  become: true
+  become_user: "{{ aptly_user }}"
+  register: aptly_db_init
+  changed_when: "'database recovered' in aptly_db_init.stdout or 'created' in aptly_db_init.stdout"
+  failed_when: false
+
+# ── Step 9: Nginx configuration ─────────────────────────────────────
+- name: Deploy nginx aptly site config
+  ansible.builtin.copy:
+    content: |
+      server {
+          listen 80 default_server;
+          listen [::]:80 default_server;
+          server_name _;
+
+          root {{ aptly_data }}/public;
+
+          # Environment routes
+          location /dev/ {
+              autoindex on;
+              autoindex_exact_size off;
+              autoindex_localtime on;
+          }
+
+          location /staging/ {
+              autoindex on;
+              autoindex_exact_size off;
+              autoindex_localtime on;
+          }
+
+          location /prod/ {
+              autoindex on;
+              autoindex_exact_size off;
+              autoindex_localtime on;
+          }
+
+          # GPG public key for clients
+          location /patchops-aptly.gpg {
+              autoindex off;
+              add_header Content-Type "application/octet-stream";
+          }
+
+          # Root for diagnostics
+          location / {
+              autoindex on;
+              autoindex_exact_size off;
+              autoindex_localtime on;
+          }
+      }
+    dest: /etc/nginx/sites-available/aptly
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Enable aptly nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/aptly
+    dest: /etc/nginx/sites-enabled/aptly
+    state: link
+  notify: Reload nginx
+
+# ── Step 10: Ensure correct ownership ───────────────────────────────
+- name: Fix ownership of aptly data
+  ansible.builtin.file:
+    path: "{{ aptly_data }}"
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    recurse: true
+
+- name: Fix ownership of GNUPG directory
+  ansible.builtin.file:
+    path: "{{ aptly_gnupg_dir }}"
+    owner: "{{ aptly_user }}"
+    group: "{{ aptly_group }}"
+    recurse: true
+
+# ── Step 11: Start services ─────────────────────────────────────────
+- name: Ensure nginx is running
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+
+- name: Ensure SSH is running
+  ansible.builtin.service:
+    name: ssh
+    state: started
+    enabled: true
+
+# ── Step 12: Verify setup ───────────────────────────────────────────
+- name: Verify aptly is accessible
+  ansible.builtin.command: >
+    aptly -config={{ aptly_config }} version
+  register: aptly_version
+  changed_when: false
+
+- name: Print aptly version
+  ansible.builtin.debug:
+    msg: "Aptly {{ aptly_version.stdout | default('unknown') }} configured"
+
+- name: Setup complete
+  ansible.builtin.debug:
+    msg:
+      - "Aptly mirror server configured"
+      - "User: {{ aptly_user }} (uid {{ aptly_uid }})"
+      - "Data: {{ aptly_data }}"
+      - "GPG key: {{ aptly_gpg_key_name }}"
+      - "Config: {{ aptly_config }}"
+      - "Architectures: {{ aptly_architectures | join(', ') }}"
