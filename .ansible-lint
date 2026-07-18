@@ -1,0 +1,15 @@
+---
+profile: production
+
+exclude_paths:
+  - .github/
+  - grafana/
+
+skip_list:
+  # aptly has no idiomatic Ansible module — shelling out to the CLI is
+  # intentional throughout the aptly-facing roles/playbooks.
+  - command-instead-of-module
+  - no-changed-when
+
+warn_list:
+  - experimental

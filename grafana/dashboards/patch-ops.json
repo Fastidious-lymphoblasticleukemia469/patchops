@@ -526,64 +526,6 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "cve_count"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "CVEs"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "max_cvss"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Max CVSS"
-              },
-              {
-                "id": "decimals",
-                "value": 1
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "yellow",
-                      "value": 4
-                    },
-                    {
-                      "color": "orange",
-                      "value": 7
-                    },
-                    {
-                      "color": "red",
-                      "value": 9
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
               "options": "reboot_required"
             },
             "properties": [
@@ -615,44 +557,6 @@
                 "id": "custom.cellOptions",
                 "value": {
                   "type": "color-text"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "reboot_pending_days"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Reboot Days"
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "orange",
-                      "value": 7
-                    },
-                    {
-                      "color": "red",
-                      "value": 14
-                    }
-                  ]
-                }
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-background"
                 }
               }
             ]
@@ -714,7 +618,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT hostname, env_name, risk_tier, risk_score, security_count, regular_count, total_upgrades, cve_count, max_cvss, reboot_required::text, reboot_pending_days, scan_timestamp FROM (SELECT DISTINCT ON (hostname) * FROM scan_results ORDER BY hostname, scan_timestamp DESC) l WHERE env_name IN (${env}) ORDER BY CASE LOWER(risk_tier) WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END, total_upgrades DESC",
+          "rawSql": "SELECT hostname, env_name, risk_tier, risk_score, security_count, regular_count, total_upgrades, reboot_required::text, scan_timestamp FROM (SELECT DISTINCT ON (hostname) * FROM scan_results ORDER BY hostname, scan_timestamp DESC) l WHERE env_name IN (${env}) ORDER BY CASE LOWER(risk_tier) WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END, total_upgrades DESC",
           "refId": "A"
         }
       ],

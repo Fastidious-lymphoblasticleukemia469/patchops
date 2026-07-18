@@ -18,7 +18,7 @@
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
-    govdb_password: patchops_govdb_pass
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
     max_snapshots: 30
     ubuntu_repos:
       - name: ubuntu-noble
@@ -67,7 +67,7 @@
       loop: "{{ all_repos }}"
       register: mirror_update
       changed_when: "'Downloaded' in mirror_update.stdout or 'packages' in mirror_update.stdout"
-      failed_when: false
+      failed_when: mirror_update.rc != 0
       timeout: 600
 
     # ── Create per-mirror snapshots ──────────────────────────────
@@ -81,7 +81,9 @@
       loop: "{{ all_repos }}"
       register: snapshot_create
       changed_when: "'Snapshot' in snapshot_create.stdout"
-      failed_when: false
+      failed_when: >
+        snapshot_create.rc != 0 and
+        'already exists' not in (snapshot_create.stderr | default(''))
 
     # ── Merge snapshots ──────────────────────────────────────────
     - name: Merge Ubuntu snapshots
@@ -96,7 +98,9 @@
       become_user: "{{ aptly_user }}"
       register: merge_ubuntu
       changed_when: "'Snapshot' in merge_ubuntu.stdout"
-      failed_when: false
+      failed_when: >
+        merge_ubuntu.rc != 0 and
+        'already exists' not in (merge_ubuntu.stderr | default(''))
 
     - name: Merge third-party snapshots
       ansible.builtin.command:
@@ -109,7 +113,9 @@
       become_user: "{{ aptly_user }}"
       register: merge_tp
       changed_when: "'Snapshot' in merge_tp.stdout"
-      failed_when: false
+      failed_when: >
+        merge_tp.rc != 0 and
+        'already exists' not in (merge_tp.stderr | default(''))
 
     - name: Merge all into composite snapshot
       ansible.builtin.command:
@@ -121,7 +127,9 @@
       become_user: "{{ aptly_user }}"
       register: merge_all
       changed_when: "'Snapshot' in merge_all.stdout"
-      failed_when: false
+      failed_when: >
+        merge_all.rc != 0 and
+        'already exists' not in (merge_all.stderr | default(''))
 
     # ── Register in patchgov.snapshots ────────────────────────────
     - name: Upsert snapshot into patchgov
@@ -181,6 +189,15 @@
       changed_when: "'dropped' in pruned.stdout"
       failed_when: false
 
+    - name: Warn about snapshots that failed to prune
+      ansible.builtin.debug:
+        msg: >
+          WARNING: could not drop snapshot {{ item.item }}: {{ item.stderr | default('unknown error') }}
+      loop: "{{ pruned.results | default([]) }}"
+      when: item.rc is defined and item.rc != 0
+      loop_control:
+        label: "{{ item.item | default('') }}"
+
     # ── Publish to /dev ──────────────────────────────────────────
     - name: Publish snapshot to dev (switch)
       ansible.builtin.command:
@@ -212,6 +229,16 @@
       register: publish_dev_init
       changed_when: "'successfully published' in publish_dev_init.stdout"
       failed_when: false
+
+    - name: Fail if dev publish did not actually succeed
+      ansible.builtin.fail:
+        msg: >
+          Failed to publish {{ snapshot_name }} to /dev/.
+          switch: rc={{ publish_dev.rc }} {{ publish_dev.stderr | default('') }}
+          initial: rc={{ publish_dev_init.rc | default('skipped') }} {{ publish_dev_init.stderr | default('') }}
+      when: >
+        publish_dev.rc != 0 and
+        (publish_dev_init is skipped or publish_dev_init.rc != 0)
 
     # ── Update dev_published_at in patchgov ───────────────────────
     - name: Update dev_published_at in patchgov

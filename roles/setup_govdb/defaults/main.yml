@@ -6,11 +6,14 @@ patch_governance_db_host: localhost
 patch_governance_db_port: 5433
 patch_governance_db_name: patchgov
 patch_governance_db_user: postgres
-patch_governance_db_password: patchops_govdb_pass
+# Real value comes from group_vars/all/vault.yml — this placeholder makes the
+# role fail loudly if that scope isn't loaded, instead of silently using a
+# known password.
+patch_governance_db_password: "{{ undef(hint='patch_governance_db_password must come from group_vars/all/vault.yml') }}"
 
 # Read-only user for Grafana dashboards
 patch_governance_db_ro_user: patchgov_ro
-patch_governance_db_ro_password: patchgov_ro_pass
+patch_governance_db_ro_password: "{{ undef(hint='patch_governance_db_ro_password must come from group_vars/all/vault.yml') }}"
 
 # Connection pool tuning
 patch_governance_db_max_connections: 200

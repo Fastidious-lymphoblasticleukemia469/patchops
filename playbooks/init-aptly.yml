@@ -77,7 +77,9 @@
       loop: "{{ all_repos }}"
       register: mirror_create
       changed_when: "'successfully added' in mirror_create.stdout"
-      failed_when: false
+      failed_when: >
+        mirror_create.rc != 0 and
+        'already exists' not in (mirror_create.stderr | default(''))
 
     - name: Update all mirrors
       ansible.builtin.command:
@@ -86,7 +88,7 @@
       loop: "{{ all_repos }}"
       register: mirror_update
       changed_when: "'Downloaded' in mirror_update.stdout or 'packages' in mirror_update.stdout"
-      failed_when: false
+      failed_when: mirror_update.rc != 0
       timeout: 600
 
     # ── Snapshots ────────────────────────────────────────────────
@@ -100,7 +102,9 @@
       loop: "{{ all_repos }}"
       register: snapshot_create
       changed_when: "'Snapshot' in snapshot_create.stdout"
-      failed_when: false
+      failed_when: >
+        snapshot_create.rc != 0 and
+        'already exists' not in (snapshot_create.stderr | default(''))
 
     - name: Merge Ubuntu snapshots into single noble snapshot
       ansible.builtin.command:
@@ -114,7 +118,9 @@
       become_user: "{{ aptly_user }}"
       register: snapshot_merge_ubuntu
       changed_when: "'Snapshot' in snapshot_merge_ubuntu.stdout"
-      failed_when: false
+      failed_when: >
+        snapshot_merge_ubuntu.rc != 0 and
+        'already exists' not in (snapshot_merge_ubuntu.stderr | default(''))
 
     - name: Merge third-party snapshots into single third-party snapshot
       ansible.builtin.command:
@@ -127,7 +133,9 @@
       become_user: "{{ aptly_user }}"
       register: snapshot_merge_tp
       changed_when: "'Snapshot' in snapshot_merge_tp.stdout"
-      failed_when: false
+      failed_when: >
+        snapshot_merge_tp.rc != 0 and
+        'already exists' not in (snapshot_merge_tp.stderr | default(''))
 
     - name: Merge all into a single combined snapshot
       ansible.builtin.command:
@@ -139,7 +147,9 @@
       become_user: "{{ aptly_user }}"
       register: snapshot_merge_all
       changed_when: "'Snapshot' in snapshot_merge_all.stdout"
-      failed_when: false
+      failed_when: >
+        snapshot_merge_all.rc != 0 and
+        'already exists' not in (snapshot_merge_all.stderr | default(''))
 
     - name: Store the snapshot name for later use
       ansible.builtin.set_fact:
@@ -159,7 +169,7 @@
       loop: "{{ environments }}"
       register: publish_all
       changed_when: "'has been successfully published' in publish_all.stdout"
-      failed_when: false
+      failed_when: publish_all.rc != 0
 
     # ── Verification ─────────────────────────────────────────────
     - name: List published repos

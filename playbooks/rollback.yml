@@ -2,6 +2,12 @@
 # rollback.yml — Rollback an environment to a previous snapshot
 # Usage: ansible-playbook playbooks/rollback.yml -e "env=staging snapshot=patch-20260717-1000"
 # Tracks rollback in patchgov.snapshots.
+#
+# Two plays:
+#   1. Re-point the aptly publish for {{ env }} to the target snapshot.
+#   2. Downgrade already-installed packages on {{ env }}'s hosts to match it
+#      (apt upgrade never downgrades on its own — this is the part that
+#      actually undoes a bad patch on already-patched servers).
 
 - name: Rollback environment to previous snapshot
   hosts: aptly
@@ -15,7 +21,7 @@
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
-    govdb_password: patchops_govdb_pass
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
 
   tasks:
     # ── Validate inputs ───────────────────────────────────────────
@@ -92,6 +98,16 @@
       changed_when: "'successfully published' in rollback_init.stdout"
       failed_when: false
 
+    - name: Fail if rollback publish did not actually succeed
+      ansible.builtin.fail:
+        msg: >
+          Failed to roll back /{{ env }}/ to {{ snapshot }}.
+          switch: rc={{ rollback.rc }} {{ rollback.stderr | default('') }}
+          initial: rc={{ rollback_init.rc | default('skipped') }} {{ rollback_init.stderr | default('') }}
+      when: >
+        rollback.rc != 0 and
+        (rollback_init is skipped or rollback_init.rc != 0)
+
     # ── Update patchgov snapshot status ───────────────────────────
     - name: Clear downstream promotion timestamps on rollback
       community.postgresql.postgresql_query:
@@ -136,3 +152,112 @@
           - "Rolled back /{{ env }}/ to {{ snapshot }}"
           - "URL: http://patchops-aptly:80/{{ env }}/dists/"
           - "DB tracked: {{ 'yes' if db_update is not failed else 'no' }}"
+
+# ── Downgrade already-installed packages on affected clients ─────────────
+# The play above only re-points aptly's published repo metadata. Clients that
+# already installed newer versions won't move backwards on their own — apt
+# upgrade never downgrades. This play does the actual downgrade.
+- name: Downgrade installed packages to match rolled-back snapshot
+  hosts: "{{ env }}"
+  become: true
+  gather_facts: true
+  vars:
+    aptly_env: "{{ env }}"
+    snapshot_used: "{{ snapshot }}"
+    current_patch_type: "rollback"
+    govdb_host: localhost
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
+
+  tasks:
+    - name: Rollback downgrade block
+      block:
+        - name: Refresh apt cache from rolled-back repo
+          ansible.builtin.apt:
+            update_cache: true
+            cache_valid_time: 0
+
+        - name: Find installed packages whose version is newer than the rolled-back repo
+          ansible.builtin.shell: |
+            set -e
+            for pkg in $(apt list --installed 2>/dev/null | grep -oP '^[^/]+(?=/)'); do
+              installed=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)
+              candidate=$(apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/{print $2}')
+              if [ -n "$installed" ] && [ -n "$candidate" ] && [ "$installed" != "$candidate" ]; then
+                if dpkg --compare-versions "$installed" gt "$candidate"; then
+                  echo "${pkg}=${candidate}"
+                fi
+              fi
+            done
+          args:
+            executable: /bin/bash
+          register: downgrade_candidates
+          changed_when: false
+
+        - name: Show packages that will be downgraded
+          ansible.builtin.debug:
+            msg: "{{ downgrade_candidates.stdout_lines if downgrade_candidates.stdout_lines else ['(none — already matches rolled-back snapshot)'] }}"
+
+        - name: Downgrade packages to match rolled-back snapshot
+          ansible.builtin.apt:
+            name: "{{ downgrade_candidates.stdout_lines }}"
+            state: present
+            allow_downgrade: true
+            force: true
+          when: downgrade_candidates.stdout_lines | length > 0
+          register: downgrade_result
+
+        - name: Build rollback success report
+          ansible.builtin.set_fact:
+            rollback_report: |
+              ROLLBACK APPLIED
+              =================
+              Host:      {{ inventory_hostname }}
+              Env:       {{ env }}
+              Snapshot:  {{ snapshot }}
+              Packages downgraded: {{ downgrade_candidates.stdout_lines | length }}
+              {{ downgrade_candidates.stdout_lines | join('\n') }}
+            email_subject: "ROLLBACK OK | {{ env }} | {{ inventory_hostname }}"
+
+        - name: Send rollback success notification
+          ansible.builtin.include_role:
+            name: notify
+          vars:
+            notify_subject: "{{ email_subject }}"
+            notify_body: "{{ rollback_report }}"
+            notify_patch_status: success
+            patch_type: "{{ current_patch_type }}"
+            packages_changed: "{{ downgrade_candidates.stdout_lines | length }}"
+            snapshot_used: "{{ snapshot }}"
+            reboot_done: false
+
+      rescue:
+        - name: Build rollback failure report
+          ansible.builtin.set_fact:
+            failure_report: |
+              ROLLBACK FAILED
+              ================
+              Host:     {{ inventory_hostname }}
+              Env:      {{ env }}
+              Snapshot: {{ snapshot }}
+              Failed task: {{ ansible_failed_task.name | default('unknown') }}
+              Error: {{ ansible_failed_result.msg | default('unknown') }}
+            email_subject: "ROLLBACK FAILED | {{ env }} | {{ inventory_hostname }}"
+
+        - name: Send rollback failure notification
+          ansible.builtin.include_role:
+            name: notify
+          vars:
+            notify_subject: "{{ email_subject }}"
+            notify_body: "{{ failure_report }}"
+            notify_patch_status: failed
+            patch_type: "{{ current_patch_type }}"
+            packages_changed: 0
+            snapshot_used: "{{ snapshot }}"
+            reboot_done: false
+
+        - name: Fail the play
+          ansible.builtin.fail:
+            msg: "Rollback downgrade failed on {{ inventory_hostname }}. Notification sent."

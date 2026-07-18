@@ -1,0 +1,26 @@
+---
+# Template for group_vars/all/vault.yml — never committed (see .gitignore).
+#
+# Setup:
+#   1. echo -n 'your-random-password' > .vault_pass   (gitignored; referenced
+#      by ansible.cfg's vault_password_file)
+#   2. cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#   3. Fill in real values below
+#   4. ansible-vault encrypt group_vars/all/vault.yml
+#
+# To edit later: ansible-vault edit group_vars/all/vault.yml
+#
+# GOVDB_PASSWORD / GRAFANA_ADMIN_PASSWORD in .env (docker compose) must match
+# vault_govdb_password / vault_grafana_admin_password here — two separate
+# secret stores (compose vs. Ansible) kept in sync by hand.
+
+vault_govdb_password: "changeme-govdb-password"
+vault_govdb_ro_password: "changeme-govdb-readonly-password"
+vault_grafana_admin_password: "changeme-grafana-admin-password"
+
+# SMTP fallback — used when SMTP_USERNAME / SMTP_PASSWORD env vars aren't set
+# (e.g. non-interactive/cron/AWX runs). Leave blank to disable email.
+vault_smtp_username: ""
+vault_smtp_password: ""
+vault_notify_email_to: "you@example.com"
+vault_notify_email_from: "you@example.com"

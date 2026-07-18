@@ -179,7 +179,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS value FROM patch_history WHERE $__timeFilter(patch_timestamp) AND env_name IN (${env}) AND status = 'completed'",
+          "rawSql": "SELECT COUNT(*) AS value FROM patch_history WHERE $__timeFilter(patch_timestamp) AND env_name IN (${env}) AND status = 'success'",
           "refId": "A"
         }
       ],

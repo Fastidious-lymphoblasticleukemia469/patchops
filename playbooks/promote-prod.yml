@@ -13,7 +13,7 @@
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
-    govdb_password: patchops_govdb_pass
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
 
   tasks:
     # ── Find latest snapshot eligible for prod promotion ──────────
@@ -109,6 +109,16 @@
       changed_when: "'successfully published' in publish_init.stdout"
       failed_when: false
 
+    - name: Fail if prod publish did not actually succeed
+      ansible.builtin.fail:
+        msg: >
+          Failed to publish {{ snapshot_name }} to /prod/.
+          switch: rc={{ publish.rc }} {{ publish.stderr | default('') }}
+          initial: rc={{ publish_init.rc | default('skipped') }} {{ publish_init.stderr | default('') }}
+      when: >
+        publish.rc != 0 and
+        (publish_init is skipped or publish_init.rc != 0)
+
     # ── Update prod_published_at ──────────────────────────────────
     - name: Update prod_published_at in patchgov
       community.postgresql.postgresql_query:
@@ -122,7 +132,13 @@
           SET prod_published_at = NOW()
           WHERE name = '{{ snapshot_name }}'
             AND prod_published_at IS NULL;
+      register: db_prod_update
       ignore_errors: true
+
+    - name: Warn if prod_published_at tracking failed
+      ansible.builtin.debug:
+        msg: "WARNING: Could not update prod_published_at in patchgov. DB may be unavailable."
+      when: db_prod_update is failed
 
     # ── Verify prod route ─────────────────────────────────────────
     - name: Verify prod route

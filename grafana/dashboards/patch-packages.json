@@ -129,7 +129,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COALESCE(MAX(spd.cvss_score), 0) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority})",
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COALESCE(MAX(spd.cvss_score), 0) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND (spd.cve_priority IN (${cve_priority}) OR (spd.cve_priority IS NULL AND 'unknown' IN (${cve_priority})))",
           "refId": "A"
         }
       ],
@@ -199,7 +199,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(*) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority})",
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(*) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND (spd.cve_priority IN (${cve_priority}) OR (spd.cve_priority IS NULL AND 'unknown' IN (${cve_priority})))",
           "refId": "A"
         }
       ],
@@ -269,7 +269,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(DISTINCT spd.hostname) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority})",
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COUNT(DISTINCT spd.hostname) AS value FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND (spd.cve_priority IN (${cve_priority}) OR (spd.cve_priority IS NULL AND 'unknown' IN (${cve_priority})))",
           "refId": "A"
         }
       ],
@@ -610,7 +610,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT spd.hostname, spd.env_name, spd.package_name, spd.current_version, spd.new_version, COALESCE(spd.cve_id, '-') AS cve_id, COALESCE(spd.cve_priority, 'unknown') AS cve_priority, spd.cvss_score, spd.scan_timestamp FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority}) ORDER BY spd.cvss_score DESC, spd.hostname, spd.package_name",
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT spd.hostname, spd.env_name, spd.package_name, spd.current_version, spd.new_version, COALESCE(spd.cve_id, '-') AS cve_id, COALESCE(spd.cve_priority, 'unknown') AS cve_priority, spd.cvss_score, spd.scan_timestamp FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND (spd.cve_priority IN (${cve_priority}) OR (spd.cve_priority IS NULL AND 'unknown' IN (${cve_priority}))) ORDER BY spd.cvss_score DESC, spd.hostname, spd.package_name",
           "refId": "A"
         }
       ],
@@ -749,7 +749,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT spd.cve_priority, COUNT(*) AS count FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND spd.cve_priority IN (${cve_priority}) GROUP BY spd.cve_priority ORDER BY CASE spd.cve_priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 WHEN 'negligible' THEN 5 ELSE 6 END",
+          "rawSql": "WITH latest_scan AS (SELECT DISTINCT ON (hostname) id, hostname FROM scan_results WHERE env_name IN (${env}) ORDER BY hostname, scan_timestamp DESC) SELECT COALESCE(spd.cve_priority, 'unknown') AS cve_priority, COUNT(*) AS count FROM latest_scan ls JOIN scan_package_details spd ON spd.scan_id = ls.id WHERE ls.hostname IN (${hostname}) AND spd.is_security = true AND (spd.cve_priority IN (${cve_priority}) OR (spd.cve_priority IS NULL AND 'unknown' IN (${cve_priority}))) GROUP BY COALESCE(spd.cve_priority, 'unknown') ORDER BY CASE COALESCE(spd.cve_priority, 'unknown') WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 WHEN 'negligible' THEN 5 ELSE 6 END",
           "refId": "A"
         }
       ],
@@ -1076,7 +1076,11 @@
         "type": "query"
       },
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "datasource": {
           "type": "postgres",
           "uid": "patchgov"
@@ -1096,7 +1100,11 @@
         "type": "query"
       },
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "description": "Drills the Security section. Independent from Category below.",
         "hide": 0,
         "includeAll": true,
@@ -1108,7 +1116,11 @@
         "type": "custom"
       },
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "description": "Drills the All Pending Packages browse table.",
         "hide": 0,
         "includeAll": true,

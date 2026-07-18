@@ -1,0 +1,33 @@
+---
+# Shared, non-secret defaults + aliases into vault.yml.
+# Precedence note: group_vars/all beats role defaults, but is beaten by
+# play-level `vars:` — playbooks must NOT redeclare these var names locally.
+
+# Governance DB connection (used by setup_govdb, notify roles and the
+# promotion/scan/patch playbooks)
+patch_governance_db_host: localhost
+patch_governance_db_port: 5433
+patch_governance_db_name: patchgov
+patch_governance_db_user: postgres
+patch_governance_db_password: "{{ vault_govdb_password }}"
+patch_governance_db_ro_user: patchgov_ro
+patch_governance_db_ro_password: "{{ vault_govdb_ro_password }}"
+
+# Playbooks reference the govdb connection under a shorter `govdb_*` alias
+govdb_host: "{{ patch_governance_db_host }}"
+govdb_port: "{{ patch_governance_db_port }}"
+govdb_name: "{{ patch_governance_db_name }}"
+govdb_user: "{{ patch_governance_db_user }}"
+govdb_password: "{{ patch_governance_db_password }}"
+
+# Grafana admin credential (consumed via env var passthrough in compose.yml;
+# defined here so it's tracked alongside the other vaulted secrets)
+grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+# Notify role — SMTP + recipient defaults. SMTP_USERNAME/SMTP_PASSWORD env
+# vars (set via .env for local runs) take priority over the vaulted fallback,
+# so a non-interactive run (cron/AWX) without those env vars still works.
+notify_smtp_username: "{{ lookup('env', 'SMTP_USERNAME') | default(vault_smtp_username, true) }}"
+notify_smtp_password: "{{ lookup('env', 'SMTP_PASSWORD') | default(vault_smtp_password, true) }}"
+notify_email_to: "{{ vault_notify_email_to }}"
+notify_email_from: "{{ vault_notify_email_from }}"

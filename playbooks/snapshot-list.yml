@@ -11,7 +11,7 @@
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
-    govdb_password: patchops_govdb_pass
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
 
   tasks:
     # ── Aptly state ───────────────────────────────────────────────

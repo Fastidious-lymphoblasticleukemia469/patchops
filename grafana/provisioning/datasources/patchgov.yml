@@ -9,7 +9,7 @@ datasources:
     database: patchgov
     user: postgres
     secureJsonData:
-      password: "patchops_govdb_pass"
+      password: "$__env{GOVDB_PASSWORD}"
     jsonData:
       sslmode: disable
       maxOpenConns: 10

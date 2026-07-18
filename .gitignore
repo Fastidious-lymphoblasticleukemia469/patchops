@@ -27,9 +27,12 @@ go.work.sum
 # env file
 .env
 
+# Ansible Vault password (never commit — decrypts group_vars/all/vault.yml)
+.vault_pass
+
+# Real vault secrets — never commit even encrypted; track group_vars/all/vault.yml.example instead
+group_vars/all/vault.yml
+
 # Editor/IDE
 # .idea/
 # .vscode/
-
-PROJECT.md
-PRD.md

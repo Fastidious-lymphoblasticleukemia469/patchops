@@ -29,7 +29,7 @@
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
-    govdb_password: patchops_govdb_pass
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
 
   pre_tasks:
     # ── Precheck ─────────────────────────────────────────────────
@@ -145,7 +145,8 @@
             notify_patch_status: success
             patch_type: "{{ current_patch_type }}"
             packages_changed: "{{ host_patch_result.packages_changed }}"
-            snapshot_used: "{{ snapshot_used }}"
+            # snapshot_used already in scope from play vars — re-passing the same
+            # name here causes infinite template recursion, don't re-add it
             reboot_done: "{{ host_patch_result.reboot_done }}"
 
       rescue:
@@ -172,7 +173,8 @@
             notify_patch_status: failed
             patch_type: "{{ current_patch_type }}"
             packages_changed: 0
-            snapshot_used: "{{ snapshot_used }}"
+            # snapshot_used already in scope from play vars — re-passing the same
+            # name here causes infinite template recursion, don't re-add it
             reboot_done: false
 
         - name: Fail the play

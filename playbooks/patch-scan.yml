@@ -25,7 +25,7 @@
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
-    govdb_password: patchops_govdb_pass
+    # govdb_password comes from group_vars/all/vars.yml (vault-backed) — do not hardcode here
     scan_retention_days: 7
 
   tasks:
@@ -68,6 +68,43 @@
              'Medium' if (security_count | int > 0 or total_upgrades | int > 10) else
              'Low' }}
 
+    # ── Parse per-package details ─────────────────────────────────
+    - name: Parse upgrade lines into structured data
+      ansible.builtin.shell: |
+        echo '{{ upgrade_lines | to_json }}' | python3 -c "
+        import sys, json, re
+        lines = json.load(sys.stdin)
+        result = []
+        for line in lines:
+            m = re.match(r'^(\S+?)/(\S+)\s+\S+\s+\S+\s+\[upgradable from:\s+(\S+)\]', line)
+            if m:
+                result.append({
+                    'package_name': m.group(1),
+                    'new_version': m.group(2),
+                    'current_version': m.group(3),
+                    'is_security': 'security' in line.lower()
+                })
+            else:
+                # Fallback: simpler format
+                parts = line.split('/')
+                if len(parts) >= 2:
+                    pkg = parts[0]
+                    rest = parts[1].split()
+                    result.append({
+                        'package_name': pkg,
+                        'new_version': rest[0] if rest else '',
+                        'current_version': '',
+                        'is_security': 'security' in line.lower()
+                    })
+        print(json.dumps(result))
+        "
+      register: pkg_details_json
+      changed_when: false
+
+    - name: Parse package details JSON
+      ansible.builtin.set_fact:
+        host_package_details: "{{ pkg_details_json.stdout | from_json }}"
+
     # ── Record per-host results ──────────────────────────────────
     - name: Store host scan result
       ansible.builtin.set_fact:
@@ -80,6 +117,7 @@
           regular_count: "{{ regular_count }}"
           total_upgrades: "{{ total_upgrades }}"
           reboot_required: "{{ reboot_required }}"
+          package_details: "{{ host_package_details }}"
 
     - name: Debug host result
       ansible.builtin.debug:
@@ -149,6 +187,7 @@
             (hostname, env_name, scan_timestamp, risk_tier, risk_score,
              security_count, regular_count, total_upgrades, reboot_required)
           VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, %s)
+          RETURNING id
         positional_args:
           - "{{ item.hostname }}"
           - "{{ item.env_name }}"
@@ -169,6 +208,76 @@
       ansible.builtin.debug:
         msg: "WARNING: Could not insert scan results into patchgov. DB may be unavailable."
       when: scan_db_insert is defined and scan_db_insert is failed
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    # ── Insert package details into governance DB ────────────────
+    - name: Get scan IDs for each host
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          SELECT id, hostname FROM scan_results
+          WHERE hostname = %s ORDER BY scan_timestamp DESC LIMIT 1
+        positional_args:
+          - "{{ item.hostname }}"
+      loop: "{{ all_host_results }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ignore_errors: true
+      register: scan_ids
+
+    - name: Build scan ID lookup map
+      ansible.builtin.set_fact:
+        scan_id_map: "{{ {} }}"
+
+    - name: Populate scan ID map
+      ansible.builtin.set_fact:
+        scan_id_map: "{{ scan_id_map | combine({item.query_result[0].hostname: item.query_result[0].id}) }}"
+      loop: "{{ scan_ids.results }}"
+      when: item.query_result is defined and item.query_result | length > 0
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Insert package details
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          INSERT INTO scan_package_details
+            (scan_id, hostname, env_name, scan_timestamp, package_name,
+             current_version, new_version, is_security, tier_label)
+          VALUES (%s, %s, %s, NOW(), %s, %s, %s, %s, %s)
+        positional_args:
+          - "{{ scan_id_map[item.0.hostname] }}"
+          - "{{ item.0.hostname }}"
+          - "{{ item.0.env_name }}"
+          - "{{ item.1.package_name }}"
+          - "{{ item.1.current_version | default('') }}"
+          - "{{ item.1.new_version }}"
+          - "{{ item.1.is_security | default(false) }}"
+          - "{{ 'SECURITY' if item.1.is_security | default(false) else 'MAINT' }}"
+      loop: "{{ all_host_results | subelements('package_details', skip_missing=True) }}"
+      loop_control:
+        label: "{{ item.0.hostname }}: {{ item.1.package_name }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ignore_errors: true
+      register: pkg_detail_insert
+
+    - name: Report package details inserted
+      ansible.builtin.debug:
+        msg: "Inserted {{ pkg_detail_insert.results | selectattr('changed') | list | length }} package detail rows"
       delegate_to: localhost
       become: false
       run_once: true

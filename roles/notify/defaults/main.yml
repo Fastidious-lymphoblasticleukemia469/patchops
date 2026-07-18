@@ -3,12 +3,15 @@
 # Override via inventory or extra-vars
 
 # Email settings (Gmail SMTP)
-notify_email_to: "100ravsinghkarmwar@gmail.com"
-notify_email_from: "100ravsinghkarmwar@gmail.com"
+# Real values come from group_vars/all/vars.yml (vault-backed). These are
+# placeholder fallbacks only, used if the role is invoked without that
+# group_vars scope loaded — deliberately blank rather than a real address.
+notify_email_to: ""
+notify_email_from: ""
 notify_smtp_host: "smtp.gmail.com"
 notify_smtp_port: 587
-notify_smtp_username: "{{ (lookup('env', 'SMTP_USERNAME') | length > 0) | ternary(lookup('env', 'SMTP_USERNAME'), '100ravsinghkarmwar@gmail.com') }}"
-notify_smtp_password: "{{ (lookup('env', 'SMTP_PASSWORD') | length > 0) | ternary(lookup('env', 'SMTP_PASSWORD'), '') }}"
+notify_smtp_username: "{{ lookup('env', 'SMTP_USERNAME') | default('', true) }}"
+notify_smtp_password: "{{ lookup('env', 'SMTP_PASSWORD') | default('', true) }}"
 
 # Report content — caller MUST set these via include_role vars
 notify_subject: ""
@@ -19,12 +22,14 @@ is_scan_only: false
 notify_patch_status: ""  # success | failed | ""
 
 # Governance DB (for patch notifications)
+# Real connection values come from group_vars/all/vars.yml. The password
+# below is deliberately not a real credential — see that file.
 patch_governance_db_enabled: true
 patch_governance_db_host: localhost
 patch_governance_db_port: 5433
 patch_governance_db_name: patchgov
 patch_governance_db_user: postgres
-patch_governance_db_password: patchops_govdb_pass
+patch_governance_db_password: "{{ undef(hint='patch_governance_db_password must come from group_vars/all/vault.yml') }}"
 
 # Audit log
 notify_audit_log_dir: "~/.local/share/patchops"
