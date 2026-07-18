@@ -1,0 +1,24 @@
+---
+# PostgreSQL governance database configuration
+# Override via inventory or environment variables
+
+patch_governance_db_host: patchops-govdb
+patch_governance_db_port: 5433
+patch_governance_db_name: patchgov
+patch_governance_db_user: postgres
+patch_governance_db_password: patchops_govdb_pass
+
+# Read-only user for Grafana dashboards
+patch_governance_db_ro_user: patchgov_ro
+patch_governance_db_ro_password: patchgov_ro_pass
+
+# Connection pool tuning
+patch_governance_db_max_connections: 200
+
+# Data retention
+scan_results_retention_days: 7
+patch_history_retention_days: 90
+snapshot_retention_days: 365
+
+# Snapshot naming
+snapshot_prefix: patch

@@ -1,19 +1,25 @@
 ---
-# Daily snapshot workflow:
+# snapshot-create.yml — Daily mirror sync, snapshot creation, and dev promotion
 #   1. Update all mirrors (sync with upstream)
-#   2. Create timestamped snapshots
-#   3. Merge into a single combined snapshot
-#   4. Prune snapshots older than 90 days
-#   5. Publish the combined snapshot to /dev
+#   2. Create timestamped snapshots per mirror
+#   3. Merge into a single composite snapshot (patch-YYYYMMDD-HHMM)
+#   4. Register snapshot in patchgov.snapshots table
+#   5. Prune old snapshots (max 30 kept, published snapshots protected)
+#   6. Publish the composite snapshot to /dev
+#   7. Update dev_published_at in patchgov
 
 - name: Daily snapshot creation and dev promotion
   hosts: aptly
   become: true
   vars:
     aptly_config: /etc/aptly/aptly.conf
-    aptly_data: /var/cache/aptly
     aptly_user: aptly
-    snapshot_retention_days: 90
+    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    govdb_password: patchops_govdb_pass
+    max_snapshots: 30
     ubuntu_repos:
       - name: ubuntu-noble
         mirror: http://archive.ubuntu.com/ubuntu/
@@ -47,6 +53,12 @@
     all_repos: "{{ ubuntu_repos + third_party_repos }}"
 
   tasks:
+    # ── Generate readable snapshot name ─────────────────────────────
+    - name: Generate snapshot name (patch-YYYYMMDD-HHMM)
+      ansible.builtin.set_fact:
+        snapshot_ts: "{{ ansible_date_time.date | replace('-', '') }}-{{ (ansible_date_time.hour + '00')[:2] }}{{ (ansible_date_time.minute + '00')[:2] }}"
+        snapshot_name: "patch-{{ ansible_date_time.date | replace('-', '') }}-{{ (ansible_date_time.hour + '00')[:2] }}{{ (ansible_date_time.minute + '00')[:2] }}"
+
     # ── Sync mirrors ─────────────────────────────────────────────
     - name: Update all mirrors
       ansible.builtin.command:
@@ -58,12 +70,12 @@
       failed_when: false
       timeout: 600
 
-    # ── Create snapshots ─────────────────────────────────────────
+    # ── Create per-mirror snapshots ──────────────────────────────
     - name: Create snapshot for each mirror
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} snapshot create
-          {{ item.name }}-{{ ansible_date_time.epoch }}
+          {{ item.name }}-{{ snapshot_ts }}
           from mirror {{ item.name }}
       become_user: "{{ aptly_user }}"
       loop: "{{ all_repos }}"
@@ -71,15 +83,16 @@
       changed_when: "'Snapshot' in snapshot_create.stdout"
       failed_when: false
 
+    # ── Merge snapshots ──────────────────────────────────────────
     - name: Merge Ubuntu snapshots
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} snapshot merge -latest
-          noble-{{ ansible_date_time.epoch }}
-          ubuntu-noble-{{ ansible_date_time.epoch }}
-          ubuntu-noble-updates-{{ ansible_date_time.epoch }}
-          ubuntu-noble-security-{{ ansible_date_time.epoch }}
-          ubuntu-noble-backports-{{ ansible_date_time.epoch }}
+          noble-{{ snapshot_ts }}
+          ubuntu-noble-{{ snapshot_ts }}
+          ubuntu-noble-updates-{{ snapshot_ts }}
+          ubuntu-noble-security-{{ snapshot_ts }}
+          ubuntu-noble-backports-{{ snapshot_ts }}
       become_user: "{{ aptly_user }}"
       register: merge_ubuntu
       changed_when: "'Snapshot' in merge_ubuntu.stdout"
@@ -89,96 +102,146 @@
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} snapshot merge -latest
-          thirdparty-{{ ansible_date_time.epoch }}
-          docker-{{ ansible_date_time.epoch }}
-          nodesource-20-{{ ansible_date_time.epoch }}
-          nginx-mainline-{{ ansible_date_time.epoch }}
+          thirdparty-{{ snapshot_ts }}
+          docker-{{ snapshot_ts }}
+          nodesource-20-{{ snapshot_ts }}
+          nginx-mainline-{{ snapshot_ts }}
       become_user: "{{ aptly_user }}"
       register: merge_tp
       changed_when: "'Snapshot' in merge_tp.stdout"
       failed_when: false
 
-    - name: Merge all into combined snapshot
+    - name: Merge all into composite snapshot
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} snapshot merge -latest
-          patchops-{{ ansible_date_time.epoch }}
-          noble-{{ ansible_date_time.epoch }}
-          thirdparty-{{ ansible_date_time.epoch }}
+          {{ snapshot_name }}
+          noble-{{ snapshot_ts }}
+          thirdparty-{{ snapshot_ts }}
       become_user: "{{ aptly_user }}"
       register: merge_all
       changed_when: "'Snapshot' in merge_all.stdout"
       failed_when: false
 
-    - name: Set snapshot fact
-      ansible.builtin.set_fact:
-        new_snapshot: "patchops-{{ ansible_date_time.epoch }}"
+    # ── Register in patchgov.snapshots ────────────────────────────
+    - name: Upsert snapshot into patchgov
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          INSERT INTO snapshots (name, created_at, mirror_sources)
+          VALUES (
+            '{{ snapshot_name }}',
+            NOW(),
+            ARRAY{{ all_repos | map(attribute='mirror') | list }}
+          )
+          ON CONFLICT (name) DO UPDATE SET
+            created_at = snapshots.created_at,
+            mirror_sources = snapshots.mirror_sources;
+      register: db_upsert
+      ignore_errors: true
 
-    # ── Prune old snapshots (older than retention_days) ──────────
-    - name: List all snapshots
+    - name: Warn if DB tracking failed
+      ansible.builtin.debug:
+        msg: "WARNING: Could not register snapshot in patchgov. DB may be unavailable."
+      when: db_upsert is failed
+
+    # ── Prune old aptly snapshots (max {{ max_snapshots }} kept) ──
+    - name: List all aptly snapshots
       ansible.builtin.command:
         cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
       become_user: "{{ aptly_user }}"
       register: snapshot_list
       changed_when: false
 
-    - name: Prune old snapshots
+    - name: Identify published snapshots (to protect from pruning)
+      ansible.builtin.command:
+        cmd: "aptly -config={{ aptly_config }} publish list -raw"
+      become_user: "{{ aptly_user }}"
+      register: published_list
+      changed_when: false
+
+    - name: Collect patch snapshots
+      ansible.builtin.set_fact:
+        patch_snapshots: "{{ snapshot_list.stdout_lines | select('search', '^patch-') | sort }}"
+
+    - name: Prune excess patch snapshots (keep max {{ max_snapshots }})
       ansible.builtin.command:
         cmd: "aptly -config={{ aptly_config }} snapshot drop {{ item }}"
       become_user: "{{ aptly_user }}"
-      loop: "{{ snapshot_list.stdout_lines }}"
+      loop: "{{ patch_snapshots }}"
       when:
-        - item | regex_search('(\\d{10})')
-        - (ansible_date_time.epoch | int - item | regex_search('(\\d{10})') | int) > (snapshot_retention_days * 86400)
+        - patch_snapshots | length > max_snapshots
+        - patch_snapshots.index(item) < (patch_snapshots | length - max_snapshots)
+        - item not in published_list.stdout
       register: pruned
       changed_when: "'dropped' in pruned.stdout"
       failed_when: false
 
-    # ── Publish to dev ───────────────────────────────────────────
-    - name: Publish latest snapshot to dev
+    # ── Publish to /dev ──────────────────────────────────────────
+    - name: Publish snapshot to dev (switch)
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} publish switch
           -batch
-          -prefix=dev
           -architectures=amd64
           -gpg-key="PatchOps Aptly"
-          {{ new_snapshot }}
-          patchops-{{ ansible_date_time.epoch }} || true
+          noble
+          dev
+          {{ snapshot_name }}
       become_user: "{{ aptly_user }}"
       register: publish_dev
-      changed_when: "'has been successfully updated' in publish_dev.stdout or 'has been successfully published' in publish_dev.stdout"
+      changed_when: "'successfully updated' in publish_dev.stdout or 'successfully published' in publish_dev.stdout"
       failed_when: false
 
-    # ── Fallback: initial publish if switch fails ────────────────
-    - name: Initial publish to dev (if switch failed)
+    - name: Publish snapshot to dev (initial)
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} publish snapshot
           -batch
-          -prefix=dev
           -architectures=amd64
           -gpg-key="PatchOps Aptly"
-          {{ new_snapshot }}
+          -distribution=noble
+          {{ snapshot_name }}
+          dev
       become_user: "{{ aptly_user }}"
-      when: "'has been successfully updated' not in publish_dev.stdout and 'has been successfully published' not in publish_dev.stdout"
+      when: "'successfully updated' not in publish_dev.stdout and 'successfully published' not in publish_dev.stdout"
       register: publish_dev_init
-      changed_when: "'has been successfully published' in publish_dev_init.stdout"
+      changed_when: "'successfully published' in publish_dev_init.stdout"
       failed_when: false
 
-    # ── Output ───────────────────────────────────────────────────
-    - name: Show published repos
-      ansible.builtin.command:
-        cmd: "aptly -config={{ aptly_config }} publish list"
-      become_user: "{{ aptly_user }}"
-      register: publish_list
-      changed_when: false
+    # ── Update dev_published_at in patchgov ───────────────────────
+    - name: Update dev_published_at in patchgov
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          UPDATE snapshots
+          SET dev_published_at = NOW()
+          WHERE name = '{{ snapshot_name }}'
+            AND dev_published_at IS NULL;
+      register: db_dev_update
+      ignore_errors: true
 
+    # ── Verify dev route ─────────────────────────────────────────
+    - name: Verify dev route is accessible
+      ansible.builtin.uri:
+        url: "http://localhost:80/dev/dists/"
+        return_content: true
+      register: verify
+      failed_when: "'dists' not in verify.content"
+
+    # ── Output ───────────────────────────────────────────────────
     - name: Summary
       ansible.builtin.debug:
         msg:
-          - "New snapshot: {{ new_snapshot }}"
+          - "Snapshot: {{ snapshot_name }}"
           - "Published to: /dev/"
           - "URL: http://{{ inventory_hostname }}:80/dev/dists/"
-          - "Published repos:"
-          - "{{ publish_list.stdout_lines }}"
+          - "DB tracked: {{ 'yes' if db_upsert is not failed else 'no' }}"

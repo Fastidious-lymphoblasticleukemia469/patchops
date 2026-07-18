@@ -1,0 +1,12 @@
+---
+# setup_govdb.yml — One-time provisioning of the patchgov governance database
+# Creates the PostgreSQL schema, tables, views, indexes, and read-only user.
+# Safe to re-run (fully idempotent).
+
+- name: Setup patchgov governance database
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - setup_govdb

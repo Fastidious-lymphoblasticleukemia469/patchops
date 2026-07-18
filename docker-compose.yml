@@ -85,9 +85,30 @@ services:
     networks:
       - ansible-lab-net
 
+  govdb:
+    image: postgres:16-alpine
+    container_name: patchops-govdb
+    hostname: patchops-govdb
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: patchgov
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${GOVDB_PASSWORD:-patchops_govdb_pass}
+    volumes:
+      - govdb-data:/var/lib/postgresql/data
+    networks:
+      - ansible-lab-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d patchgov"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   aptly-data:
   aptly-gnupg:
+  govdb-data:
   ubuntu1-home:
   ubuntu1-data:
   ubuntu2-home:

@@ -1,6 +1,6 @@
 ---
-# Promote to /prod with bake-time validation.
-# Only promotes snapshots that have existed for >48 hours in staging.
+# promote-prod.yml — Promote to /prod with 48hr bake gate
+# Checks patchgov.snapshots.staging_published_at to enforce soak time.
 
 - name: Promote snapshot to prod (48hr bake gate)
   hosts: aptly
@@ -9,82 +9,132 @@
     aptly_config: /etc/aptly/aptly.conf
     aptly_user: aptly
     min_bake_hours: 48
+    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    govdb_password: patchops_govdb_pass
 
   tasks:
-    - name: List all available snapshots
-      ansible.builtin.command:
-        cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
-      become_user: "{{ aptly_user }}"
-      register: snapshot_list
-      changed_when: false
+    # ── Find latest snapshot eligible for prod promotion ──────────
+    - name: Query latest snapshot from patchgov
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          SELECT name, staging_published_at
+          FROM snapshots
+          WHERE staging_published_at IS NOT NULL
+            AND prod_published_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT 1;
+      register: latest_snapshot
+      ignore_errors: true
 
-    - name: Find latest patchops snapshot
-      ansible.builtin.set_fact:
-        latest_snapshot: "{{ snapshot_list.stdout_lines | select('search', '^patchops-') | sort | last }}"
+    - name: Fail if no snapshot available for prod promotion
+      ansible.builtin.fail:
+        msg: "No snapshot found in patchgov with staging_published_at set and prod_published_at NULL."
+      when: latest_snapshot is failed or latest_snapshot.query_result | length == 0
 
-    - name: Extract snapshot epoch
+    - name: Extract snapshot details
       ansible.builtin.set_fact:
-        snapshot_epoch: "{{ latest_snapshot | regex_search('(\\d{10})') }}"
+        snapshot_name: "{{ latest_snapshot.query_result[0].name }}"
+        staging_published_at: "{{ latest_snapshot.query_result[0].staging_published_at }}"
 
-    - name: Calculate snapshot age in hours
+    # ── Calculate soak time ──────────────────────────────────────
+    - name: Calculate hours since staging publication
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          SELECT EXTRACT(EPOCH FROM (NOW() - staging_published_at)) / 3600.0 AS hours_soaked
+          FROM snapshots
+          WHERE name = '{{ snapshot_name }}';
+      register: soak_check
+
+    - name: Set soak hours fact
       ansible.builtin.set_fact:
-        snapshot_age_hours: "{{ ((ansible_date_time.epoch | int - snapshot_epoch | int) / 3600) | round(1) }}"
+        soak_hours: "{{ '%.1f' | format(soak_check.query_result[0].hours_soaked | float) }}"
 
     - name: Show promotion details
       ansible.builtin.debug:
         msg:
-          - "Snapshot: {{ latest_snapshot }}"
-          - "Snapshot age: {{ snapshot_age_hours }} hours"
-          - "Required bake time: {{ min_bake_hours }} hours"
+          - "Snapshot: {{ snapshot_name }}"
+          - "Soaked in staging: {{ soak_hours }} hours"
+          - "Required: {{ min_bake_hours }} hours"
 
-    - name: Fail if snapshot is too young
+    - name: Fail if snapshot hasn't soaked long enough
       ansible.builtin.fail:
         msg: >
-          Snapshot {{ latest_snapshot }} is only {{ snapshot_age_hours }} hours old.
-          Minimum bake time for prod is {{ min_bake_hours }} hours.
-          Wait {{ (min_bake_hours - snapshot_age_hours) | round(1) }} more hours before promoting.
-      when: snapshot_age_hours | float < min_bake_hours | float
+          Snapshot {{ snapshot_name }} has only soaked for {{ soak_hours }} hours in staging.
+          Minimum required: {{ min_bake_hours }} hours.
+          Wait {{ '%.1f' | format(min_bake_hours | float - soak_hours | float) }} more hours.
+      when: soak_hours | float < min_bake_hours | float
 
-    - name: Publish snapshot to prod
+    # ── Promote to /prod ─────────────────────────────────────────
+    - name: Publish snapshot to prod (switch)
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} publish switch
           -batch
-          -prefix=prod
           -architectures=amd64
           -gpg-key="PatchOps Aptly"
-          {{ latest_snapshot }}
-          patchops-{{ snapshot_epoch }}
+          noble
+          prod
+          {{ snapshot_name }}
       become_user: "{{ aptly_user }}"
       register: publish
       changed_when: "'successfully updated' in publish.stdout or 'successfully published' in publish.stdout"
       failed_when: false
 
-    - name: Initial publish to prod (if switch failed)
+    - name: Publish snapshot to prod (initial)
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} publish snapshot
           -batch
-          -prefix=prod
           -architectures=amd64
           -gpg-key="PatchOps Aptly"
-          {{ latest_snapshot }}
+          -distribution=noble
+          {{ snapshot_name }}
+          prod
       become_user: "{{ aptly_user }}"
       when: "'successfully updated' not in publish.stdout and 'successfully published' not in publish.stdout"
       register: publish_init
       changed_when: "'successfully published' in publish_init.stdout"
       failed_when: false
 
+    # ── Update prod_published_at ──────────────────────────────────
+    - name: Update prod_published_at in patchgov
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          UPDATE snapshots
+          SET prod_published_at = NOW()
+          WHERE name = '{{ snapshot_name }}'
+            AND prod_published_at IS NULL;
+      ignore_errors: true
+
+    # ── Verify prod route ─────────────────────────────────────────
     - name: Verify prod route
       ansible.builtin.uri:
         url: "http://localhost:80/prod/dists/"
-        return_content: yes
+        return_content: true
       register: verify
       failed_when: "'dists' not in verify.content"
 
     - name: Prod promotion complete
       ansible.builtin.debug:
         msg:
-          - "Published {{ latest_snapshot }} to /prod/"
-          - "Age: {{ snapshot_age_hours }}h (passed {{ min_bake_hours }}h gate)"
+          - "Published {{ snapshot_name }} to /prod/"
+          - "Soaked {{ soak_hours }}h in staging (passed {{ min_bake_hours }}h gate)"
           - "URL: http://patchops-aptly:80/prod/dists/"

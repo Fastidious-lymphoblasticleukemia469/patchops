@@ -1,6 +1,7 @@
 ---
-# Rollback an environment to a previous snapshot.
-# Usage: ansible-playbook playbooks/rollback.yml -e "env=dev snapshot=patchops-1234567890"
+# rollback.yml — Rollback an environment to a previous snapshot
+# Usage: ansible-playbook playbooks/rollback.yml -e "env=staging snapshot=patch-20260717-1000"
+# Tracks rollback in patchgov.snapshots.
 
 - name: Rollback environment to previous snapshot
   hosts: aptly
@@ -10,15 +11,22 @@
     aptly_user: aptly
     env: dev
     snapshot: ""
+    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    govdb_password: patchops_govdb_pass
 
   tasks:
+    # ── Validate inputs ───────────────────────────────────────────
     - name: Validate environment parameter
       ansible.builtin.assert:
         that:
           - env in ['dev', 'staging', 'prod']
         fail_msg: "env must be one of: dev, staging, prod"
 
-    - name: List available snapshots if none specified
+    # ── List snapshots if none specified ──────────────────────────
+    - name: List available patch snapshots
       ansible.builtin.command:
         cmd: "aptly -config={{ aptly_config }} snapshot list -raw"
       become_user: "{{ aptly_user }}"
@@ -26,19 +34,20 @@
       when: snapshot == ""
       changed_when: false
 
-    - name: Show available snapshots
+    - name: Show available patch snapshots
       ansible.builtin.debug:
-        msg: "{{ snapshot_list.stdout_lines | select('search', '^patchops-') | sort }}"
+        msg: "{{ snapshot_list.stdout_lines | select('search', '^patch-') | sort }}"
       when: snapshot == ""
 
     - name: Fail if no snapshot specified
       ansible.builtin.fail:
         msg: >
           No snapshot specified. Run with -e "snapshot=<name>".
-          Available patchops snapshots shown above.
+          Available patch snapshots shown above.
       when: snapshot == ""
 
-    - name: Verify target snapshot exists
+    # ── Verify target exists ──────────────────────────────────────
+    - name: Verify target snapshot exists in aptly
       ansible.builtin.command:
         cmd: "aptly -config={{ aptly_config }} snapshot show {{ snapshot }}"
       become_user: "{{ aptly_user }}"
@@ -46,31 +55,78 @@
       changed_when: false
       failed_when: "'Name:' not in snapshot_show.stdout"
 
-    - name: Confirm rollback
+    # ── Perform rollback ──────────────────────────────────────────
+    - name: Rolling back environment
       ansible.builtin.debug:
         msg:
-          - "ROLLBACK: Rolling back /{{ env }}/ to {{ snapshot }}"
-          - "This will switch the published repo to this older snapshot."
+          - "ROLLBACK: Switching /{{ env }}/ to {{ snapshot }}"
 
-    - name: Perform rollback
+    - name: Publish snapshot to environment (switch)
       ansible.builtin.command:
         cmd: >
           aptly -config={{ aptly_config }} publish switch
           -batch
-          -prefix={{ env }}
           -architectures=amd64
           -gpg-key="PatchOps Aptly"
+          noble
+          {{ env }}
           {{ snapshot }}
-          patchops-{{ snapshot | regex_search('(\\d{10})') }}
       become_user: "{{ aptly_user }}"
       register: rollback
       changed_when: "'successfully updated' in rollback.stdout or 'successfully published' in rollback.stdout"
       failed_when: false
 
+    - name: Publish snapshot to environment (initial)
+      ansible.builtin.command:
+        cmd: >
+          aptly -config={{ aptly_config }} publish snapshot
+          -batch
+          -architectures=amd64
+          -gpg-key="PatchOps Aptly"
+          -distribution=noble
+          {{ snapshot }}
+          {{ env }}
+      become_user: "{{ aptly_user }}"
+      when: "'successfully updated' not in rollback.stdout and 'successfully published' not in rollback.stdout"
+      register: rollback_init
+      changed_when: "'successfully published' in rollback_init.stdout"
+      failed_when: false
+
+    # ── Update patchgov snapshot status ───────────────────────────
+    - name: Clear downstream promotion timestamps on rollback
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          UPDATE snapshots
+          SET
+            {% if env == 'dev' %}
+            dev_published_at = NOW(),
+            staging_published_at = NULL,
+            prod_published_at = NULL
+            {% elif env == 'staging' %}
+            staging_published_at = NOW(),
+            prod_published_at = NULL
+            {% elif env == 'prod' %}
+            prod_published_at = NOW()
+            {% endif %}
+          WHERE name = '{{ snapshot }}';
+      register: db_update
+      ignore_errors: true
+
+    - name: Warn if DB update failed
+      ansible.builtin.debug:
+        msg: "WARNING: Could not update patchgov snapshot status. DB may be unavailable."
+      when: db_update is failed
+
+    # ── Verify rollback ───────────────────────────────────────────
     - name: Verify rollback
       ansible.builtin.uri:
         url: "http://localhost:80/{{ env }}/dists/"
-        return_content: yes
+        return_content: true
       register: verify
       failed_when: "'dists' not in verify.content"
 
@@ -79,3 +135,4 @@
         msg:
           - "Rolled back /{{ env }}/ to {{ snapshot }}"
           - "URL: http://patchops-aptly:80/{{ env }}/dists/"
+          - "DB tracked: {{ 'yes' if db_update is not failed else 'no' }}"

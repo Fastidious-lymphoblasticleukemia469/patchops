@@ -1,14 +1,20 @@
 ---
-# List all aptly snapshots, mirrors, and published repos.
+# snapshot-list.yml — Show all aptly state + patchgov snapshot tracking
 
-- name: List aptly state
+- name: Show aptly state and patchgov snapshot timeline
   hosts: aptly
   become: true
   vars:
     aptly_config: /etc/aptly/aptly.conf
     aptly_user: aptly
+    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    govdb_port: 5433
+    govdb_name: patchgov
+    govdb_user: postgres
+    govdb_password: patchops_govdb_pass
 
   tasks:
+    # ── Aptly state ───────────────────────────────────────────────
     - name: List mirrors
       ansible.builtin.command:
         cmd: "aptly -config={{ aptly_config }} mirror list -raw"
@@ -48,10 +54,44 @@
           - "=== Published Repos ==="
           - "{{ published.stdout_lines if published.stdout_lines else ['(none)'] }}"
 
+    # ── Patchgov snapshot timeline ────────────────────────────────
+    - name: Query patchgov snapshot timeline
+      community.postgresql.postgresql_query:
+        db: "{{ govdb_name }}"
+        login_host: "{{ govdb_host }}"
+        login_port: "{{ govdb_port }}"
+        login_user: "{{ govdb_user }}"
+        login_password: "{{ govdb_password }}"
+        query: >
+          SELECT
+            name,
+            created_at,
+            dev_published_at,
+            staging_published_at,
+            prod_published_at
+          FROM snapshots
+          ORDER BY created_at DESC
+          LIMIT 20;
+      register: govdb_snapshots
+      ignore_errors: true
+
+    - name: Show patchgov snapshot timeline
+      ansible.builtin.debug:
+        msg:
+          - "=== PatchGov Snapshot Timeline (last 20) ==="
+          - "{{ govdb_snapshots.query_result if govdb_snapshots.query_result is defined and govdb_snapshots is not failed else '(DB unavailable)' }}"
+      when: govdb_snapshots is not failed
+
+    - name: Warn if patchgov unavailable
+      ansible.builtin.debug:
+        msg: "=== PatchGov: UNAVAILABLE ==="
+      when: govdb_snapshots is failed
+
+    # ── Test environment routes ───────────────────────────────────
     - name: Test environment routes
       ansible.builtin.uri:
         url: "http://localhost:80/{{ item }}/dists/"
-        return_content: yes
+        return_content: true
         status_code: [200, 301, 302, 403]
       register: route_check
       loop: [dev, staging, prod]
