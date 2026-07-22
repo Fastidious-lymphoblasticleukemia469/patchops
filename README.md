@@ -121,7 +121,7 @@ AWX comes up on `:8081` (not `:8080` — that's aptly's own API port). `2ssk/pat
 
 - The mirror sync is a **real** multi-GB download of Ubuntu Noble (`main restricted universe multiverse` across 4 components) plus Docker/NodeSource/Nginx third-party repos — expect it to take a while on first run, not seconds.
 - The lab fleet (`compose.lab.yml`) boots bare `ubuntu:24.04` images and installs SSH/Python on every start — OS-level packages installed by Ansible afterward (aptly, nginx) do **not** survive a container restart, only `/var/cache/aptly` and the client home volumes do. Fine for a demo lab; not how you'd run this against real hosts.
-- CVE severity/priority columns in the Package Upgrades dashboard are honestly `UNKNOWN` — there's no CVE enrichment pipeline (no NVD/USN lookup) yet, so the schema exists but isn't populated. The dashboard doesn't pretend otherwise.
+- CVE severity/CVSS in the Package Upgrades dashboard come from a real pipeline: `patch-scan.yml` parses each security package's changelog for the CVE IDs it actually fixes, then scores them via Ubuntu's public security tracker. It degrades gracefully — a slow or unreachable lookup just leaves that CVE's priority/score blank for that scan, it doesn't fail the pipeline.
 
 ---
 
@@ -137,14 +137,6 @@ grafana/             dashboards + datasource provisioning
 compose.yml          govdb + grafana
 compose.lab.yml      aptly + 5-host demo fleet
 ```
-
----
-
-## Known gaps
-
-- No automated tests beyond `yamllint`/`ansible-lint`/syntax-check CI — nothing runs the pipeline functionally in CI yet.
-- No CVE enrichment (NVD/USN lookup) — security packages are flagged, but not scored.
-- Prod promotion is soak-time gated, not human-approved; there's no workflow-approval step.
 
 ---
 
