@@ -1,0 +1,4 @@
+openssh-clients
+sshpass
+python3
+gcc

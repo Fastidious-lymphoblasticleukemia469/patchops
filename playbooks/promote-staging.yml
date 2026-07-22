@@ -9,7 +9,10 @@
     aptly_config: /etc/aptly/aptly.conf
     aptly_user: aptly
     min_bake_hours: 24
-    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    # Testing/demo override only — bypasses the bake-time safety gate.
+    # Usage: -e "skip_soak=true". Never set true on a real promotion.
+    skip_soak: false
+    govdb_host: localhost
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
@@ -31,6 +34,8 @@
             AND staging_published_at IS NULL
           ORDER BY created_at DESC
           LIMIT 1;
+      delegate_to: localhost
+      become: false
       register: latest_snapshot
       ignore_errors: true
 
@@ -56,6 +61,8 @@
           SELECT EXTRACT(EPOCH FROM (NOW() - dev_published_at)) / 3600.0 AS hours_soaked
           FROM snapshots
           WHERE name = '{{ snapshot_name }}';
+      delegate_to: localhost
+      become: false
       register: soak_check
 
     - name: Set soak hours fact
@@ -75,7 +82,15 @@
           Snapshot {{ snapshot_name }} has only soaked for {{ soak_hours }} hours in dev.
           Minimum required: {{ min_bake_hours }} hours.
           Wait {{ '%.1f' | format(min_bake_hours | float - soak_hours | float) }} more hours.
-      when: soak_hours | float < min_bake_hours | float
+          (Testing override: -e "skip_soak=true")
+      when:
+        - not (skip_soak | bool)
+        - soak_hours | float < min_bake_hours | float
+
+    - name: Warn that the bake-time gate was bypassed
+      ansible.builtin.debug:
+        msg: "WARNING: skip_soak=true — promoting {{ snapshot_name }} without the {{ min_bake_hours }}h gate."
+      when: (skip_soak | bool) and (soak_hours | float < min_bake_hours | float)
 
     # ── Promote to /staging ──────────────────────────────────────
     - name: Publish snapshot to staging (switch)
@@ -132,6 +147,8 @@
           SET staging_published_at = NOW()
           WHERE name = '{{ snapshot_name }}'
             AND staging_published_at IS NULL;
+      delegate_to: localhost
+      become: false
       register: db_staging_update
       ignore_errors: true
 

@@ -76,12 +76,14 @@
         lines = json.load(sys.stdin)
         result = []
         for line in lines:
-            m = re.match(r'^(\S+?)/(\S+)\s+\S+\s+\S+\s+\[upgradable from:\s+(\S+)\]', line)
+            # Format: pkg/pocket new_version arch [upgradable from: old_version]
+            # e.g. 'tar/noble-updates,noble-security 1.35+dfsg-3ubuntu0.3 amd64 [upgradable from: 1.35+dfsg-3build1]'
+            m = re.match(r'^(\S+?)/(\S+)\s+(\S+)\s+\S+\s+\[upgradable from:\s+(\S+)\]', line)
             if m:
                 result.append({
                     'package_name': m.group(1),
-                    'new_version': m.group(2),
-                    'current_version': m.group(3),
+                    'new_version': m.group(3),
+                    'current_version': m.group(4),
                     'is_security': 'security' in line.lower()
                 })
             else:
@@ -92,7 +94,7 @@
                     rest = parts[1].split()
                     result.append({
                         'package_name': pkg,
-                        'new_version': rest[0] if rest else '',
+                        'new_version': rest[1] if len(rest) > 1 else '',
                         'current_version': '',
                         'is_security': 'security' in line.lower()
                     })
@@ -105,18 +107,89 @@
       ansible.builtin.set_fact:
         host_package_details: "{{ pkg_details_json.stdout | from_json }}"
 
+    # ── Extract CVE IDs from package changelogs (security packages only) ──
+    # apt-get changelog fetches the real Debian/Ubuntu changelog for the
+    # package, which lists the CVE(s) each security update fixes. This is
+    # the actual source of truth for "which CVEs does this update fix" — far
+    # more precise than guessing from the package name alone. Best-effort:
+    # a package whose changelog can't be fetched just gets an empty CVE list,
+    # it doesn't fail the scan.
+    - name: Extract CVE IDs from changelogs
+      ansible.builtin.shell: |
+        echo '{{ host_package_details | to_json }}' | python3 -c "
+        import sys, json, re, subprocess
+
+        packages = json.load(sys.stdin)
+        cve_pattern = re.compile(r'CVE-\d{4}-\d{4,}')
+        entry_pattern = re.compile(r'^\S+\s+\(([^)]+)\)\s')
+
+        def is_newer(v1, v2):
+            if not v2:
+                return True
+            try:
+                subprocess.run(['dpkg', '--compare-versions', v1, 'gt', v2], check=True)
+                return True
+            except Exception:
+                return False
+
+        for pkg in packages:
+            pkg['cve_ids'] = []
+            if not pkg.get('is_security'):
+                continue
+            try:
+                proc = subprocess.run(
+                    ['apt-get', 'changelog', pkg['package_name']],
+                    capture_output=True, text=True, timeout=20
+                )
+                text = proc.stdout
+            except Exception:
+                continue
+            if not text:
+                continue
+            cves = set()
+            current = pkg.get('current_version', '')
+            in_relevant_entry = True
+            for line in text.splitlines():
+                m = entry_pattern.match(line)
+                if m:
+                    in_relevant_entry = is_newer(m.group(1), current)
+                    if not in_relevant_entry:
+                        break
+                if in_relevant_entry:
+                    cves.update(cve_pattern.findall(line))
+            pkg['cve_ids'] = sorted(cves)[:5]
+
+        print(json.dumps(packages))
+        "
+      register: cve_extract_json
+      changed_when: false
+      failed_when: false
+      timeout: 300
+
+    - name: Merge CVE IDs into package details
+      ansible.builtin.set_fact:
+        host_package_details: "{{ cve_extract_json.stdout | from_json }}"
+      when: >
+        cve_extract_json.rc | default(1) == 0 and
+        cve_extract_json.stdout | default('') | length > 0
+
     # ── Record per-host results ──────────────────────────────────
     - name: Store host scan result
       ansible.builtin.set_fact:
+        # Numeric/bool fields are explicitly cast here — relying on Ansible's
+        # native-type templating for a bare "{{ var }}" dict value is version
+        # dependent (confirmed: works in some ansible-core versions, silently
+        # renders as a string in others), and a string here breaks the
+        # 'gt'/'equalto' comparisons in post_tasks below.
         host_scan_result:
           hostname: "{{ inventory_hostname }}"
           env_name: "{{ aptly_env }}"
           risk_tier: "{{ risk_tier }}"
-          risk_score: "{{ risk_score }}"
-          security_count: "{{ security_count }}"
-          regular_count: "{{ regular_count }}"
-          total_upgrades: "{{ total_upgrades }}"
-          reboot_required: "{{ reboot_required }}"
+          risk_score: "{{ risk_score | int }}"
+          security_count: "{{ security_count | int }}"
+          regular_count: "{{ regular_count | int }}"
+          total_upgrades: "{{ total_upgrades | int }}"
+          reboot_required: "{{ reboot_required | bool }}"
           package_details: "{{ host_package_details }}"
 
     - name: Debug host result
@@ -129,14 +202,81 @@
       ansible.builtin.set_fact:
         all_host_results: "{{ groups['ubuntu'] | map('extract', hostvars, 'host_scan_result') | select('defined') | list }}"
 
+    # ── CVE severity/CVSS lookup (one call per unique CVE across the whole
+    # fleet, not per host — the same package/CVE shows up on every host that
+    # hasn't patched yet, so this dedupes before hitting the network) ──────
+    - name: Collect unique CVE IDs across the fleet
+      ansible.builtin.set_fact:
+        all_cve_ids: "{{ all_host_results | map(attribute='package_details') | flatten | map(attribute='cve_ids', default=[]) | flatten | unique }}"
+
+    - name: Look up CVE severity/CVSS from Ubuntu's security tracker
+      ansible.builtin.shell: |
+        echo '{{ all_cve_ids | to_json }}' | python3 -c "
+        import sys, json, time, urllib.request
+
+        cve_ids = json.load(sys.stdin)
+        result = {}
+        for cve_id in cve_ids:
+            try:
+                req = urllib.request.Request(
+                    'https://ubuntu.com/security/cves/' + cve_id + '.json',
+                    headers={'User-Agent': 'patchops-scan'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.load(resp)
+                metrics = (data.get('impact') or {}).get('baseMetricV3', {}).get('cvssV3', {})
+                score = data.get('cvss3')
+                severity = metrics.get('baseSeverity')
+                if score is None:
+                    score = metrics.get('baseScore')
+                result[cve_id] = {
+                    'score': score,
+                    'priority': severity.lower() if severity else None,
+                }
+            except Exception:
+                result[cve_id] = {'score': None, 'priority': None}
+            time.sleep(1)
+        print(json.dumps(result))
+        "
+      register: cve_lookup_json
+      changed_when: false
+      failed_when: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: all_cve_ids | length > 0
+      timeout: 600
+
+    - name: Build CVE info map
+      ansible.builtin.set_fact:
+        cve_info: >-
+          {{ (cve_lookup_json.stdout | from_json)
+             if (cve_lookup_json is defined and cve_lookup_json is not skipped
+                 and cve_lookup_json.rc | default(1) == 0
+                 and cve_lookup_json.stdout | default('') | length > 0)
+             else {} }}
+
+    - name: Warn if CVE lookup found nothing
+      ansible.builtin.debug:
+        msg: "WARNING: Could not reach Ubuntu's CVE tracker — CVE priority/CVSS columns will be blank this scan."
+      when: all_cve_ids | length > 0 and cve_info | length == 0
+
     - name: Count risk tiers
+      # 'total_upgrades'/'reboot_required' cross a hostvars round-trip (each
+      # host extracts every other host's facts here) — some ansible-core
+      # versions re-stringify nested set_fact values in that round-trip
+      # regardless of `| int`/`| bool` casts at the source, so 'gt'/direct
+      # bool 'equalto' comparisons can raise "'>' not supported between
+      # instances of 'str' and 'int'". equalto against both representations
+      # sidesteps the type mismatch instead of relying on it being fixed
+      # upstream.
       ansible.builtin.set_fact:
         critical_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'Critical') | list }}"
         high_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'High') | list }}"
         medium_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'Medium') | list }}"
         low_hosts: "{{ all_host_results | selectattr('risk_tier', 'equalto', 'Low') | list }}"
-        hosts_needing_reboot: "{{ all_host_results | selectattr('reboot_required', 'equalto', true) | list }}"
-        hosts_needing_action: "{{ all_host_results | selectattr('total_upgrades', 'gt', 0) | list }}"
+        hosts_needing_reboot: "{{ all_host_results | rejectattr('reboot_required', 'equalto', false) | rejectattr('reboot_required', 'equalto', 'False') | list }}"
+        hosts_needing_action: "{{ all_host_results | rejectattr('total_upgrades', 'equalto', 0) | rejectattr('total_upgrades', 'equalto', '0') | list }}"
 
     - name: Build scan report
       ansible.builtin.set_fact:
@@ -245,6 +385,54 @@
       become: false
       run_once: true
 
+    # Flattened + CVE-enriched in one pass, in Python — picking the "worst"
+    # (highest-scored) CVE per package out of a list is easier here than as
+    # nested Jinja lookups across two dicts.
+    - name: Build enriched package detail rows
+      ansible.builtin.shell: |
+        echo '{{ {"hosts": all_host_results, "cve_info": cve_info | default({})} | to_json }}' | python3 -c "
+        import sys, json
+
+        _input = json.load(sys.stdin)
+        hosts = _input['hosts']
+        cve_info = _input['cve_info']
+
+        rows = []
+        for h in hosts:
+            for pkg in h.get('package_details', []):
+                cve_ids = pkg.get('cve_ids') or []
+                best_id, best_score, best_priority = None, None, None
+                for cid in cve_ids:
+                    info = cve_info.get(cid, {})
+                    score = info.get('score')
+                    if score is not None and (best_score is None or score > best_score):
+                        best_id, best_score, best_priority = cid, score, info.get('priority')
+                if best_id is None and cve_ids:
+                    best_id = cve_ids[0]
+                rows.append({
+                    'hostname': h['hostname'],
+                    'env_name': h['env_name'],
+                    'package_name': pkg['package_name'],
+                    'current_version': pkg.get('current_version') or '',
+                    'new_version': pkg.get('new_version') or '',
+                    'is_security': bool(pkg.get('is_security', False)),
+                    'tier_label': 'SECURITY' if pkg.get('is_security') else 'MAINT',
+                    'cve_id': ', '.join(cve_ids) if cve_ids else None,
+                    'cve_priority': best_priority,
+                    'cvss_score': best_score,
+                })
+        print(json.dumps(rows))
+        "
+      register: enriched_rows_json
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Parse enriched package detail rows
+      ansible.builtin.set_fact:
+        enriched_package_rows: "{{ enriched_rows_json.stdout | from_json }}"
+
     - name: Insert package details
       community.postgresql.postgresql_query:
         db: "{{ govdb_name }}"
@@ -255,20 +443,24 @@
         query: >
           INSERT INTO scan_package_details
             (scan_id, hostname, env_name, scan_timestamp, package_name,
-             current_version, new_version, is_security, tier_label)
-          VALUES (%s, %s, %s, NOW(), %s, %s, %s, %s, %s)
+             current_version, new_version, is_security, tier_label,
+             cve_id, cve_priority, cvss_score)
+          VALUES (%s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s)
         positional_args:
-          - "{{ scan_id_map[item.0.hostname] }}"
-          - "{{ item.0.hostname }}"
-          - "{{ item.0.env_name }}"
-          - "{{ item.1.package_name }}"
-          - "{{ item.1.current_version | default('') }}"
-          - "{{ item.1.new_version }}"
-          - "{{ item.1.is_security | default(false) }}"
-          - "{{ 'SECURITY' if item.1.is_security | default(false) else 'MAINT' }}"
-      loop: "{{ all_host_results | subelements('package_details', skip_missing=True) }}"
+          - "{{ scan_id_map[item.hostname] }}"
+          - "{{ item.hostname }}"
+          - "{{ item.env_name }}"
+          - "{{ item.package_name }}"
+          - "{{ item.current_version }}"
+          - "{{ item.new_version }}"
+          - "{{ item.is_security }}"
+          - "{{ item.tier_label }}"
+          - "{{ item.cve_id }}"
+          - "{{ item.cve_priority }}"
+          - "{{ item.cvss_score }}"
+      loop: "{{ enriched_package_rows }}"
       loop_control:
-        label: "{{ item.0.hostname }}: {{ item.1.package_name }}"
+        label: "{{ item.hostname }}: {{ item.package_name }}"
       delegate_to: localhost
       become: false
       run_once: true

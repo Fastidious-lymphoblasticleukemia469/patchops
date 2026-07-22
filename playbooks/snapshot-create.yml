@@ -14,7 +14,7 @@
   vars:
     aptly_config: /etc/aptly/aptly.conf
     aptly_user: aptly
-    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    govdb_host: localhost
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
@@ -68,7 +68,7 @@
       register: mirror_update
       changed_when: "'Downloaded' in mirror_update.stdout or 'packages' in mirror_update.stdout"
       failed_when: mirror_update.rc != 0
-      timeout: 600
+      timeout: 5400
 
     # ── Create per-mirror snapshots ──────────────────────────────
     - name: Create snapshot for each mirror
@@ -149,6 +149,8 @@
           ON CONFLICT (name) DO UPDATE SET
             created_at = snapshots.created_at,
             mirror_sources = snapshots.mirror_sources;
+      delegate_to: localhost
+      become: false
       register: db_upsert
       ignore_errors: true
 
@@ -253,6 +255,8 @@
           SET dev_published_at = NOW()
           WHERE name = '{{ snapshot_name }}'
             AND dev_published_at IS NULL;
+      delegate_to: localhost
+      become: false
       register: db_dev_update
       ignore_errors: true
 

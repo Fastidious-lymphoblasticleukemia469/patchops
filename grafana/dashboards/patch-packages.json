@@ -831,6 +831,32 @@
               {
                 "id": "displayName",
                 "value": "Category"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "MAINT": {
+                        "color": "text",
+                        "index": 1,
+                        "text": "Maintenance"
+                      },
+                      "SECURITY": {
+                        "color": "red",
+                        "index": 0,
+                        "text": "Security"
+                      }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
               }
             ]
           },
@@ -1121,14 +1147,14 @@
           "text": "All",
           "value": "$__all"
         },
-        "description": "Drills the All Pending Packages browse table.",
+        "description": "Drills the All Pending Packages browse table. Values must match scan_package_details.tier_label exactly (SECURITY | MAINT, set by patch-scan.yml).",
         "hide": 0,
         "includeAll": true,
         "label": "Category",
         "multi": true,
         "name": "category",
         "options": [],
-        "query": "Security Update,Recommended Update,Kernel Update,Runtime Update",
+        "query": "SECURITY,MAINT",
         "type": "custom"
       }
     ]

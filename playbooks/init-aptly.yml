@@ -89,7 +89,7 @@
       register: mirror_update
       changed_when: "'Downloaded' in mirror_update.stdout or 'packages' in mirror_update.stdout"
       failed_when: mirror_update.rc != 0
-      timeout: 600
+      timeout: 5400
 
     # ── Snapshots ────────────────────────────────────────────────
     - name: Create snapshots of each mirror

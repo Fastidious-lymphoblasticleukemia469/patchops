@@ -17,7 +17,7 @@
     aptly_user: aptly
     env: dev
     snapshot: ""
-    govdb_host: "{{ hostvars['patchops-govdb']['ansible_host'] | default('patchops-govdb') }}"
+    govdb_host: localhost
     govdb_port: 5433
     govdb_name: patchgov
     govdb_user: postgres
@@ -130,6 +130,8 @@
             prod_published_at = NOW()
             {% endif %}
           WHERE name = '{{ snapshot }}';
+      delegate_to: localhost
+      become: false
       register: db_update
       ignore_errors: true
 

@@ -8,6 +8,7 @@ services:
     image: ubuntu:24.04
     container_name: patchops-aptly
     hostname: patchops-aptly
+    restart: unless-stopped
     command: >
       sh -c "apt-get update -qq &&
       apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
@@ -34,6 +35,7 @@ services:
     image: ubuntu:24.04
     container_name: ansible-ubuntu1
     hostname: ansible-ubuntu1
+    restart: unless-stopped
     command: >
       sh -c "apt-get update -qq &&
       apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
@@ -58,6 +60,7 @@ services:
     image: ubuntu:24.04
     container_name: ansible-ubuntu2
     hostname: ansible-ubuntu2
+    restart: unless-stopped
     command: >
       sh -c "apt-get update -qq &&
       apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
@@ -82,6 +85,7 @@ services:
     image: ubuntu:24.04
     container_name: ansible-ubuntu3
     hostname: ansible-ubuntu3
+    restart: unless-stopped
     command: >
       sh -c "apt-get update -qq &&
       apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
@@ -106,6 +110,7 @@ services:
     image: ubuntu:24.04
     container_name: ansible-ubuntu4
     hostname: ansible-ubuntu4
+    restart: unless-stopped
     command: >
       sh -c "apt-get update -qq &&
       apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
@@ -130,6 +135,7 @@ services:
     image: ubuntu:24.04
     container_name: ansible-ubuntu5
     hostname: ansible-ubuntu5
+    restart: unless-stopped
     command: >
       sh -c "apt-get update -qq &&
       apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&

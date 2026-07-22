@@ -1,0 +1,305 @@
+---
+# AWX-as-code: configures the patchops pipeline in AWX.
+#
+# Scope: this playbook creates the INVENTORY, JOB TEMPLATES and SCHEDULES.
+# The organization, execution environment, project, and credentials
+# (patchops-machine-ssh, patchops-vault) are bootstrapped by launch_web.sh on
+# every AWX web container start — this playbook assumes they already exist.
+#
+# Prerequisites:
+#   pip install awxkit
+#   ansible-galaxy collection install awx.awx
+#
+# Environment variables:
+#   CONTROLLER_HOST         http://localhost:8080   (AWX UI URL)
+#   CONTROLLER_USERNAME     admin
+#   CONTROLLER_PASSWORD     <AWX_ADMIN_PASSWORD from awx/.env>
+#
+# Usage:
+#   ansible-playbook awx/configure.yml
+
+- name: Configure AWX for patchops
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    controller_host: "{{ lookup('env', 'CONTROLLER_HOST')     | default('http://localhost:8080', true) }}"
+    controller_username: "{{ lookup('env', 'CONTROLLER_USERNAME') | default('admin', true) }}"
+    controller_password: "{{ lookup('env', 'CONTROLLER_PASSWORD') | default('', true) }}"
+    controller_validate_certs: false
+
+    awx_org: PatchOps
+    awx_ee: patchops-ee
+    awx_project: patchops
+    awx_ssh_cred: patchops-machine-ssh
+    awx_vault_cred: patchops-vault
+
+  tasks:
+    # -----------------------------------------------------------------------
+    # Inventory — mirrors ../inventory.ini's groups/hosts directly via the
+    # awx.awx.host/group modules (a Manual project can't back an SCM
+    # inventory source, so this is the AWX-as-code equivalent of the static
+    # file). Job templates scope to a subgroup via `limit:`, matching the
+    # existing CLI workflow (ansible-playbook ... -l dev).
+    # -----------------------------------------------------------------------
+    - name: Create patchops inventory
+      awx.awx.inventory:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: patchops
+        organization: "{{ awx_org }}"
+        # equivalent of inventory.ini's [all:vars]
+        variables:
+          ansible_python_interpreter: /usr/bin/python3
+          ansible_connection: ssh
+        state: present
+
+    - name: Create hosts
+      awx.awx.host:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "{{ item.name }}"
+        inventory: patchops
+        variables: "{{ item.vars }}"
+        state: present
+      loop:
+        - { name: patchops-aptly, vars: { ansible_host: 127.0.0.1, ansible_port: 2200, ansible_user: aptly } }
+        - { name: patchops-govdb, vars: { ansible_host: patchops-govdb, ansible_port: 5432, ansible_user: postgres } }
+        - { name: ansible-ubuntu1, vars: { ansible_host: 127.0.0.1, ansible_port: 2201, aptly_env: dev } }
+        - { name: ansible-ubuntu2, vars: { ansible_host: 127.0.0.1, ansible_port: 2202, aptly_env: dev } }
+        - { name: ansible-ubuntu3, vars: { ansible_host: 127.0.0.1, ansible_port: 2203, aptly_env: staging } }
+        - { name: ansible-ubuntu4, vars: { ansible_host: 127.0.0.1, ansible_port: 2204, aptly_env: prod } }
+        - { name: ansible-ubuntu5, vars: { ansible_host: 127.0.0.1, ansible_port: 2205, aptly_env: prod } }
+
+    - name: Create leaf groups
+      awx.awx.group:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "{{ item.name }}"
+        inventory: patchops
+        hosts: "{{ item.hosts }}"
+        preserve_existing_hosts: false
+        state: present
+      loop:
+        - { name: aptly, hosts: [patchops-aptly] }
+        - { name: govdb, hosts: [patchops-govdb] }
+        - { name: dev, hosts: [ansible-ubuntu1, ansible-ubuntu2] }
+        - { name: staging, hosts: [ansible-ubuntu3] }
+        - { name: prod, hosts: [ansible-ubuntu4, ansible-ubuntu5] }
+
+    - name: Create ubuntu parent group with dev/staging/prod as children
+      awx.awx.group:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: ubuntu
+        inventory: patchops
+        children: [dev, staging, prod]
+        preserve_existing_children: false
+        state: present
+
+    # -----------------------------------------------------------------------
+    # Setup / bootstrap job templates — on-demand, no schedule.
+    # -----------------------------------------------------------------------
+    - name: Create setup job templates
+      awx.awx.job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "{{ item.name }}"
+        organization: "{{ awx_org }}"
+        job_type: run
+        inventory: patchops
+        project: "{{ awx_project }}"
+        playbook: "{{ item.playbook }}"
+        execution_environment: "{{ awx_ee }}"
+        credentials: "{{ [awx_ssh_cred, awx_vault_cred] }}"
+        become_enabled: true
+        survey_enabled: false
+        limit: "{{ item.limit | default(omit) }}"
+        state: present
+      loop:
+        - { name: "setup | init-aptly", playbook: playbooks/init-aptly.yml, limit: aptly }
+        - { name: "setup | setup-aptly", playbook: playbooks/setup-aptly.yml, limit: aptly }
+        - { name: "setup | setup-govdb", playbook: playbooks/setup_govdb.yml, limit: localhost }
+        - { name: "setup | configure-clients-dev", playbook: playbooks/configure-clients.yml, limit: dev }
+        - { name: "setup | configure-clients-staging", playbook: playbooks/configure-clients.yml, limit: staging }
+        - { name: "setup | configure-clients-prod", playbook: playbooks/configure-clients.yml, limit: prod }
+
+    # -----------------------------------------------------------------------
+    # Pipeline job templates — the 9 scheduled/on-demand jobs that make up
+    # the daily/weekly promotion cycle.
+    # -----------------------------------------------------------------------
+    - name: Create pipeline job templates
+      awx.awx.job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "{{ item.name }}"
+        organization: "{{ awx_org }}"
+        job_type: run
+        inventory: patchops
+        project: "{{ awx_project }}"
+        playbook: "{{ item.playbook }}"
+        execution_environment: "{{ awx_ee }}"
+        credentials: "{{ [awx_ssh_cred, awx_vault_cred] }}"
+        become_enabled: true
+        survey_enabled: false
+        limit: "{{ item.limit | default(omit) }}"
+        extra_vars: "{{ item.extra_vars | default(omit) }}"
+        state: present
+      loop:
+        # ── Aptly: sync + snapshot + dev publish (combined — see
+        #    snapshot-create.yml's own header for why this is one step) ────
+        - { name: "aptly | snapshot-create", playbook: playbooks/snapshot-create.yml, limit: aptly }
+
+        # ── Scan (read-only, whole fleet) ──────────────────────────────────
+        - { name: "patchops | patch-scan", playbook: playbooks/patch-scan.yml, limit: ubuntu }
+
+        # ── Dev: apply security patches daily, no gate ─────────────────────
+        - { name: "patchops | patch-dev", playbook: playbooks/patch-security.yml, limit: dev }
+
+        # ── Staging: bake-gated promotion + apply ──────────────────────────
+        - { name: "aptly | promote-staging", playbook: playbooks/promote-staging.yml, limit: aptly }
+        - { name: "patchops | apply-staging", playbook: playbooks/patch-security.yml, limit: staging }
+
+        # ── Prod: bake-gated promotion + rolling apply ─────────────────────
+        - { name: "aptly | promote-prod", playbook: playbooks/promote-prod.yml, limit: aptly }
+        - { name: "patchops | apply-prod", playbook: playbooks/patch-security.yml, limit: prod, extra_vars: { deploy_serial: "25%" } }
+
+    # -----------------------------------------------------------------------
+    # Rollback — on-demand only, survey-enabled for env/snapshot params.
+    # -----------------------------------------------------------------------
+    - name: Create rollback job template
+      awx.awx.job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "patchops | rollback"
+        organization: "{{ awx_org }}"
+        job_type: run
+        inventory: patchops
+        project: "{{ awx_project }}"
+        playbook: playbooks/rollback.yml
+        execution_environment: "{{ awx_ee }}"
+        credentials: "{{ [awx_ssh_cred, awx_vault_cred] }}"
+        become_enabled: true
+        survey_enabled: true
+        survey_spec:
+          name: ""
+          description: ""
+          spec:
+            - question_name: "Environment"
+              variable: env
+              type: multiplechoice
+              choices: ["dev", "staging", "prod"]
+              required: true
+            - question_name: "Snapshot name"
+              variable: snapshot
+              type: text
+              required: true
+        state: present
+
+    # -----------------------------------------------------------------------
+    # Schedules — matches the cadence documented for the promotion pipeline.
+    # -----------------------------------------------------------------------
+    - name: Schedule daily aptly snapshot-create
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "aptly | snapshot-create — daily 01:00 UTC"
+        unified_job_template: "aptly | snapshot-create"
+        rrule: "DTSTART:20260101T010000Z RRULE:FREQ=DAILY;INTERVAL=1"
+        enabled: true
+        state: present
+
+    - name: Schedule daily patch scan
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "patchops | patch-scan — daily 06:00 UTC"
+        unified_job_template: "patchops | patch-scan"
+        rrule: "DTSTART:20260101T060000Z RRULE:FREQ=DAILY;INTERVAL=1"
+        enabled: true
+        state: present
+
+    - name: Schedule daily patch-dev
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "patchops | patch-dev — daily 02:00 UTC"
+        unified_job_template: "patchops | patch-dev"
+        rrule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+        enabled: true
+        state: present
+
+    # Snapshot must have soaked >=24h in dev; promote-staging.yml itself
+    # enforces the gate and fails the job if it hasn't — the schedule is not
+    # the gate, the playbook's own bake-time assertion is.
+    - name: Schedule weekly promote-to-staging
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "aptly | promote-staging — Mon 02:00 UTC"
+        unified_job_template: "aptly | promote-staging"
+        rrule: "DTSTART:20260105T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
+        enabled: true
+        state: present
+
+    - name: Schedule weekly apply-staging
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "patchops | apply-staging — Mon 02:30 UTC"
+        unified_job_template: "patchops | apply-staging"
+        rrule: "DTSTART:20260105T023000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
+        enabled: true
+        state: present
+
+    # Snapshot must have soaked >=48h in staging; promote-prod.yml enforces
+    # the gate the same way. There is no separate human-approval step yet —
+    # see the AWX prep notes for what a real approval gate would need.
+    - name: Schedule weekly promote-to-prod
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "aptly | promote-prod — Tue 02:00 UTC"
+        unified_job_template: "aptly | promote-prod"
+        rrule: "DTSTART:20260106T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=TU"
+        enabled: true
+        state: present
+
+    - name: Schedule weekly apply-prod
+      awx.awx.schedule:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        name: "patchops | apply-prod — Tue 03:00 UTC"
+        unified_job_template: "patchops | apply-prod"
+        rrule: "DTSTART:20260106T030000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=TU"
+        enabled: true
+        state: present
