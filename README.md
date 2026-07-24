@@ -2,6 +2,8 @@
 
 > Governed package promotion from source to server.
 
+**Why this exists.** Traditional Linux patching is ad-hoc — cron-driven SSH loops, manual repo management, and no audit trail between "we pushed a package" and "we know it landed." PatchOps replaces that with governed snapshot promotion: upstream repos are mirrored once, frozen into immutable snapshots, promoted through time-gated environments, and applied to clients with full observability. Every patch is tracked, every failure is visible, and rollback is a single playbook run.
+
 A self-contained Linux patch governance platform: **Aptly** mirrors upstream Ubuntu repos and cuts immutable snapshots, **AWX** orchestrates the promotion pipeline on a schedule, **Ansible** does the actual patching, and **Grafana** shows what's true about the fleet right now — not what a report claimed last week.
 
 This is a from-scratch rewrite of patterns used in a real production patch-governance system (`infra-engine`), rebuilt as a portable, single-machine project. Nothing here is copy-pasted — every role, playbook, and AWX config was written fresh for this repo.
@@ -79,6 +81,17 @@ Secrets are ansible-vault encrypted end to end (`group_vars/all/vault.yml`) — 
 
 ## Quick start
 
+### Prerequisites
+
+- **Docker** 24+ and **Docker Compose** v2.24+
+- **~20 GB** free disk for the one-time Ubuntu mirror sync
+- **Ansible** 2.15+ on the control node (the EE has its own)
+- **`ansible-vault`** available on the control node
+
+**Expected ports:** `5432` (Postgres), `3000` (Grafana), `8080` (Aptly API), `8081` (AWX)
+
+### First run
+
 ```bash
 # 1. Governance DB + Grafana
 docker compose up -d
@@ -117,11 +130,22 @@ AWX comes up on `:8081` (not `:8080` — that's aptly's own API port). `2ssk/pat
 
 ---
 
-## What's real, what's a demo shortcut
+## What's in / what's out
 
 - The mirror sync is a **real** multi-GB download of Ubuntu Noble (`main restricted universe multiverse` across 4 components) plus Docker/NodeSource/Nginx third-party repos — expect it to take a while on first run, not seconds.
 - The lab fleet (`compose.lab.yml`) boots bare `ubuntu:24.04` images and installs SSH/Python on every start — OS-level packages installed by Ansible afterward (aptly, nginx) do **not** survive a container restart, only `/var/cache/aptly` and the client home volumes do. Fine for a demo lab; not how you'd run this against real hosts.
 - CVE severity/CVSS in the Package Upgrades dashboard come from a real pipeline: `patch-scan.yml` parses each security package's changelog for the CVE IDs it actually fixes, then scores them via Ubuntu's public security tracker. It degrades gracefully — a slow or unreachable lookup just leaves that CVE's priority/score blank for that scan, it doesn't fail the pipeline.
+
+---
+
+## Supported environments
+
+| Target | OS | Notes |
+|--------|-----|-------|
+| **Mirror sources** | Ubuntu 22.04 (jammy), 24.04 (noble) | security, updates, backports + third-party repos |
+| **Patched hosts** | Debian-family with `apt` | Tested on Ubuntu 22.04/24.04 |
+| **Control / Compose host** | Linux (any distro) | Docker Compose host; Ansible control via EE |
+| **Demo lab** | Docker on any Linux host | 5 `ubuntu:24.04` containers |
 
 ---
 
