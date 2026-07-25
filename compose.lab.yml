@@ -1,25 +1,30 @@
 # PatchOps Lab Stack — Aptly Mirror + Ubuntu Servers
-# Usage: docker compose -f compose.lab.yml up -d
-# No Dockerfiles — Ansible playbook handles all setup.
-# Each service boots ubuntu:24.04 with SSH + Python3 only.
+# Usage: SSH_PUBKEY="$(cat ~/.ssh/personal.pub)" docker compose -f compose.lab.yml up -d --build
+# (scripts/start.sh sets SSH_PUBKEY for you.)
+# Images are built once from docker/lab-host.Dockerfile — SSH+Python3 install
+# and the authorized_keys file are baked in at build time and cached, instead
+# of re-running apt-get on every container boot.
+
+x-ssh-host-build: &ssh-host-build
+  context: ./docker
+  dockerfile: lab-host.Dockerfile
+  args:
+    SSH_PUBKEY: ${SSH_PUBKEY}
 
 services:
   aptly:
-    image: ubuntu:24.04
+    build:
+      context: ./docker
+      dockerfile: lab-host.Dockerfile
+      args:
+        SSH_USER: aptly
+        SSH_PASS: aptly
+        SSH_UID: "115"
+        SSH_PUBKEY: ${SSH_PUBKEY}
+    image: patchops-aptly:latest
     container_name: patchops-aptly
     hostname: patchops-aptly
     restart: unless-stopped
-    command: >
-      sh -c "apt-get update -qq &&
-      apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
-      mkdir -p /run/sshd /home/aptly/.ssh &&
-      useradd -u 115 -m -s /bin/bash aptly 2>/dev/null || true &&
-      echo 'aptly:aptly' | chpasswd &&
-      echo 'aptly ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/aptly &&
-      cat /tmp/ssh_key.pub > /home/aptly/.ssh/authorized_keys &&
-      chmod 600 /home/aptly/.ssh/authorized_keys &&
-      chown -R aptly:aptly /home/aptly/.ssh &&
-      exec /usr/sbin/sshd -D"
     ports:
       - "80:80"
       - "8080:8080"
@@ -27,132 +32,76 @@ services:
     volumes:
       - aptly-data:/var/cache/aptly
       - aptly-gnupg:/home/aptly/.gnupg
-      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
     networks:
       - ansible-lab-net
 
   ubuntu1:
-    image: ubuntu:24.04
+    build: *ssh-host-build
+    image: patchops-ssh-base:latest
     container_name: ansible-ubuntu1
     hostname: ansible-ubuntu1
     restart: unless-stopped
-    command: >
-      sh -c "apt-get update -qq &&
-      apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
-      mkdir -p /run/sshd /home/ansible/.ssh &&
-      useradd -m -s /bin/bash ansible 2>/dev/null || true &&
-      echo 'ansible:ansible' | chpasswd &&
-      echo 'ansible ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/ansible &&
-      cat /tmp/ssh_key.pub > /home/ansible/.ssh/authorized_keys &&
-      chmod 600 /home/ansible/.ssh/authorized_keys &&
-      chown -R ansible:ansible /home/ansible/.ssh &&
-      exec /usr/sbin/sshd -D"
     ports:
       - "2201:22"
     volumes:
       - ubuntu1-home:/home/ansible
       - ubuntu1-data:/data
-      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
     networks:
       - ansible-lab-net
 
   ubuntu2:
-    image: ubuntu:24.04
+    build: *ssh-host-build
+    image: patchops-ssh-base:latest
     container_name: ansible-ubuntu2
     hostname: ansible-ubuntu2
     restart: unless-stopped
-    command: >
-      sh -c "apt-get update -qq &&
-      apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
-      mkdir -p /run/sshd /home/ansible/.ssh &&
-      useradd -m -s /bin/bash ansible 2>/dev/null || true &&
-      echo 'ansible:ansible' | chpasswd &&
-      echo 'ansible ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/ansible &&
-      cat /tmp/ssh_key.pub > /home/ansible/.ssh/authorized_keys &&
-      chmod 600 /home/ansible/.ssh/authorized_keys &&
-      chown -R ansible:ansible /home/ansible/.ssh &&
-      exec /usr/sbin/sshd -D"
     ports:
       - "2202:22"
     volumes:
       - ubuntu2-home:/home/ansible
       - ubuntu2-data:/data
-      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
     networks:
       - ansible-lab-net
 
   ubuntu3:
-    image: ubuntu:24.04
+    build: *ssh-host-build
+    image: patchops-ssh-base:latest
     container_name: ansible-ubuntu3
     hostname: ansible-ubuntu3
     restart: unless-stopped
-    command: >
-      sh -c "apt-get update -qq &&
-      apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
-      mkdir -p /run/sshd /home/ansible/.ssh &&
-      useradd -m -s /bin/bash ansible 2>/dev/null || true &&
-      echo 'ansible:ansible' | chpasswd &&
-      echo 'ansible ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/ansible &&
-      cat /tmp/ssh_key.pub > /home/ansible/.ssh/authorized_keys &&
-      chmod 600 /home/ansible/.ssh/authorized_keys &&
-      chown -R ansible:ansible /home/ansible/.ssh &&
-      exec /usr/sbin/sshd -D"
     ports:
       - "2203:22"
     volumes:
       - ubuntu3-home:/home/ansible
       - ubuntu3-data:/data
-      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
     networks:
       - ansible-lab-net
 
   ubuntu4:
-    image: ubuntu:24.04
+    build: *ssh-host-build
+    image: patchops-ssh-base:latest
     container_name: ansible-ubuntu4
     hostname: ansible-ubuntu4
     restart: unless-stopped
-    command: >
-      sh -c "apt-get update -qq &&
-      apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
-      mkdir -p /run/sshd /home/ansible/.ssh &&
-      useradd -m -s /bin/bash ansible 2>/dev/null || true &&
-      echo 'ansible:ansible' | chpasswd &&
-      echo 'ansible ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/ansible &&
-      cat /tmp/ssh_key.pub > /home/ansible/.ssh/authorized_keys &&
-      chmod 600 /home/ansible/.ssh/authorized_keys &&
-      chown -R ansible:ansible /home/ansible/.ssh &&
-      exec /usr/sbin/sshd -D"
     ports:
       - "2204:22"
     volumes:
       - ubuntu4-home:/home/ansible
       - ubuntu4-data:/data
-      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
     networks:
       - ansible-lab-net
 
   ubuntu5:
-    image: ubuntu:24.04
+    build: *ssh-host-build
+    image: patchops-ssh-base:latest
     container_name: ansible-ubuntu5
     hostname: ansible-ubuntu5
     restart: unless-stopped
-    command: >
-      sh -c "apt-get update -qq &&
-      apt-get install -y -qq openssh-server python3 sudo > /dev/null 2>&1 &&
-      mkdir -p /run/sshd /home/ansible/.ssh &&
-      useradd -m -s /bin/bash ansible 2>/dev/null || true &&
-      echo 'ansible:ansible' | chpasswd &&
-      echo 'ansible ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/ansible &&
-      cat /tmp/ssh_key.pub > /home/ansible/.ssh/authorized_keys &&
-      chmod 600 /home/ansible/.ssh/authorized_keys &&
-      chown -R ansible:ansible /home/ansible/.ssh &&
-      exec /usr/sbin/sshd -D"
     ports:
       - "2205:22"
     volumes:
       - ubuntu5-home:/home/ansible
       - ubuntu5-data:/data
-      - ${HOME}/.ssh/personal.pub:/tmp/ssh_key.pub:ro
     networks:
       - ansible-lab-net
 

@@ -93,11 +93,19 @@ Secrets are ansible-vault encrypted end to end (`group_vars/all/vault.yml`) — 
 ### First run
 
 ```bash
+# Fastest path — builds and starts govdb+grafana, the aptly+lab fleet, and AWX:
+./scripts/start.sh
+
+# Or drive each stack yourself:
+
 # 1. Governance DB + Grafana
 docker compose up -d
 
 # 2. Aptly + Ubuntu lab fleet (5 clients + 1 aptly host)
-docker compose -f compose.lab.yml up -d
+# SSH_PUBKEY is baked into the lab images at build time (see docker/*.Dockerfile) —
+# export it before building/starting, or use scripts/start.sh, which does this for you.
+export SSH_PUBKEY="$(cat ~/.ssh/personal.pub)"
+docker compose -f compose.lab.yml up -d --build
 
 # 3. Vault setup (one-time)
 echo -n 'your-random-password' > .vault_pass
@@ -133,7 +141,7 @@ AWX comes up on `:8081` (not `:8080` — that's aptly's own API port). `2ssk/pat
 ## What's in / what's out
 
 - The mirror sync is a **real** multi-GB download of Ubuntu Noble (`main restricted universe multiverse` across 4 components) plus Docker/NodeSource/Nginx third-party repos — expect it to take a while on first run, not seconds.
-- The lab fleet (`compose.lab.yml`) boots bare `ubuntu:24.04` images and installs SSH/Python on every start — OS-level packages installed by Ansible afterward (aptly, nginx) do **not** survive a container restart, only `/var/cache/aptly` and the client home volumes do. Fine for a demo lab; not how you'd run this against real hosts.
+- The lab fleet (`compose.lab.yml`) images bake in SSH/Python at build time (see `docker/*.Dockerfile`) — but OS-level packages installed by Ansible afterward (aptly, nginx) still do **not** survive a container recreation, only `/var/cache/aptly` and the client home volumes do. Fine for a demo lab; not how you'd run this against real hosts.
 - CVE severity/CVSS in the Package Upgrades dashboard come from a real pipeline: `patch-scan.yml` parses each security package's changelog for the CVE IDs it actually fixes, then scores them via Ubuntu's public security tracker. It degrades gracefully — a slow or unreachable lookup just leaves that CVE's priority/score blank for that scan, it doesn't fail the pipeline.
 
 ---

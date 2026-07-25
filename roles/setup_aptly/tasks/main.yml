@@ -1,6 +1,5 @@
 ---
 # setup_aptly — Idempotent aptly mirror server setup
-# Replaces the 165-line bash entrypoint with proper Ansible tasks.
 # Can be run against any aptly server (container or bare metal).
 
 # ── Step 1: System packages ─────────────────────────────────────────

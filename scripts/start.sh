@@ -15,14 +15,27 @@ docker compose up -d
 
 echo ""
 echo "=== Starting PatchOps Lab (aptly + servers) ==="
-docker compose -f compose.lab.yml up -d
+# SSH_PUBKEY is baked into the lab images at build time (see docker/*.Dockerfile)
+# instead of being bind-mounted in at runtime.
+export SSH_PUBKEY
+SSH_PUBKEY="$(cat "$PUB_KEY")"
+docker compose -f compose.lab.yml up -d --build
 
-# Wait for SSH — these are stock ubuntu:24.04 images that install
-# openssh-server fresh on every boot (nothing but /var/cache/aptly and the
-# client home dirs persist across restarts), so this can genuinely take well
-# over a minute, especially if the aptly mirror sync is competing for the
-# same network egress. A fixed short sleep is not reliable here — poll each
-# host until it actually answers instead of guessing a delay.
+echo ""
+if [ -f "$ROOT_DIR/awx/.env" ]; then
+    echo "=== Starting AWX ==="
+    cd "$ROOT_DIR/awx"
+    docker compose up -d
+    cd "$ROOT_DIR"
+else
+    echo "=== Skipping AWX (awx/.env not found — copy awx/.env.example and fill it in to enable) ==="
+fi
+
+# Wait for SSH — sshd itself starts quickly since it's baked into the image,
+# but this can still take a while if the images above just got (re)built, or
+# if the aptly mirror sync is competing for the same network egress. A fixed
+# short sleep is not reliable here — poll each host until it actually answers
+# instead of guessing a delay.
 echo ""
 echo "Waiting for SSH on all 5 lab servers (up to 3 minutes)..."
 for port in 2201 2202 2203 2204 2205; do

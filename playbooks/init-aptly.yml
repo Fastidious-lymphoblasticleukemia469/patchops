@@ -2,10 +2,12 @@
 - name: Initialize Aptly mirror server with environment-based publishing
   hosts: aptly
   become: true
+  vars_files:
+    # Pulls in aptly_config, aptly_data, aptly_user (and the rest of
+    # setup_aptly's defaults) so this playbook can't drift from the role
+    # that already provisioned the aptly server (playbooks/setup-aptly.yml).
+    - ../roles/setup_aptly/defaults/main.yml
   vars:
-    aptly_config: /etc/aptly/aptly.conf
-    aptly_data: /var/cache/aptly
-    aptly_user: aptly
     environments:
       - dev
       - staging
@@ -43,27 +45,6 @@
     all_repos: "{{ ubuntu_repos + third_party_repos }}"
 
   tasks:
-    - name: Ensure aptly directory structure exists
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: "{{ aptly_user }}"
-        group: "{{ aptly_user }}"
-        mode: "0755"
-      loop:
-        - "{{ aptly_data }}"
-        - "{{ aptly_data }}/db"
-        - "{{ aptly_data }}/pool"
-        - "{{ aptly_data }}/public"
-        - "{{ aptly_data }}/state"
-        - "/home/{{ aptly_user }}/.gnupg"
-
-    - name: Import Ubuntu archive GPG keys
-      ansible.builtin.raw: |
-        gpg --no-default-keyring --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg --export | \
-        gpg --no-default-keyring --keyring /home/aptly/.gnupg/trustedkeys.gpg --import 2>/dev/null || true
-        chown -R aptly:aptly /home/aptly/.gnupg/
-
     # ── Mirrors ──────────────────────────────────────────────────
     - name: Create mirrors for all repos
       ansible.builtin.command:

@@ -69,38 +69,33 @@
              'Low' }}
 
     # ── Parse per-package details ─────────────────────────────────
+    # Payloads are written to a temp file and passed to the script by path,
+    # rather than inline as a command-line argument — a fleet-wide JSON blob
+    # can exceed the kernel's per-argument length limit (MAX_ARG_STRLEN,
+    # ~128KiB), which `echo ... | python3 -c` (reading stdin) never hit.
+    - name: Create temp file for upgrade lines payload
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .json
+      register: upgrade_lines_tmp
+      changed_when: false
+
+    - name: Write upgrade lines payload
+      ansible.builtin.copy:
+        content: "{{ upgrade_lines | to_json }}"
+        dest: "{{ upgrade_lines_tmp.path }}"
+        mode: "0600"
+      changed_when: false
+
     - name: Parse upgrade lines into structured data
-      ansible.builtin.shell: |
-        echo '{{ upgrade_lines | to_json }}' | python3 -c "
-        import sys, json, re
-        lines = json.load(sys.stdin)
-        result = []
-        for line in lines:
-            # Format: pkg/pocket new_version arch [upgradable from: old_version]
-            # e.g. 'tar/noble-updates,noble-security 1.35+dfsg-3ubuntu0.3 amd64 [upgradable from: 1.35+dfsg-3build1]'
-            m = re.match(r'^(\S+?)/(\S+)\s+(\S+)\s+\S+\s+\[upgradable from:\s+(\S+)\]', line)
-            if m:
-                result.append({
-                    'package_name': m.group(1),
-                    'new_version': m.group(3),
-                    'current_version': m.group(4),
-                    'is_security': 'security' in line.lower()
-                })
-            else:
-                # Fallback: simpler format
-                parts = line.split('/')
-                if len(parts) >= 2:
-                    pkg = parts[0]
-                    rest = parts[1].split()
-                    result.append({
-                        'package_name': pkg,
-                        'new_version': rest[1] if len(rest) > 1 else '',
-                        'current_version': '',
-                        'is_security': 'security' in line.lower()
-                    })
-        print(json.dumps(result))
-        "
+      ansible.builtin.script: "../scripts/parse_upgrades.py {{ upgrade_lines_tmp.path }}"
       register: pkg_details_json
+      changed_when: false
+
+    - name: Remove upgrade lines payload temp file
+      ansible.builtin.file:
+        path: "{{ upgrade_lines_tmp.path }}"
+        state: absent
       changed_when: false
 
     - name: Parse package details JSON
@@ -114,57 +109,32 @@
     # more precise than guessing from the package name alone. Best-effort:
     # a package whose changelog can't be fetched just gets an empty CVE list,
     # it doesn't fail the scan.
+    - name: Create temp file for package details payload
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .json
+      register: pkg_details_tmp
+      changed_when: false
+
+    - name: Write package details payload
+      ansible.builtin.copy:
+        content: "{{ host_package_details | to_json }}"
+        dest: "{{ pkg_details_tmp.path }}"
+        mode: "0600"
+      changed_when: false
+
     - name: Extract CVE IDs from changelogs
-      ansible.builtin.shell: |
-        echo '{{ host_package_details | to_json }}' | python3 -c "
-        import sys, json, re, subprocess
-
-        packages = json.load(sys.stdin)
-        cve_pattern = re.compile(r'CVE-\d{4}-\d{4,}')
-        entry_pattern = re.compile(r'^\S+\s+\(([^)]+)\)\s')
-
-        def is_newer(v1, v2):
-            if not v2:
-                return True
-            try:
-                subprocess.run(['dpkg', '--compare-versions', v1, 'gt', v2], check=True)
-                return True
-            except Exception:
-                return False
-
-        for pkg in packages:
-            pkg['cve_ids'] = []
-            if not pkg.get('is_security'):
-                continue
-            try:
-                proc = subprocess.run(
-                    ['apt-get', 'changelog', pkg['package_name']],
-                    capture_output=True, text=True, timeout=20
-                )
-                text = proc.stdout
-            except Exception:
-                continue
-            if not text:
-                continue
-            cves = set()
-            current = pkg.get('current_version', '')
-            in_relevant_entry = True
-            for line in text.splitlines():
-                m = entry_pattern.match(line)
-                if m:
-                    in_relevant_entry = is_newer(m.group(1), current)
-                    if not in_relevant_entry:
-                        break
-                if in_relevant_entry:
-                    cves.update(cve_pattern.findall(line))
-            pkg['cve_ids'] = sorted(cves)[:5]
-
-        print(json.dumps(packages))
-        "
+      ansible.builtin.script: "../scripts/extract_cves.py {{ pkg_details_tmp.path }}"
       register: cve_extract_json
       changed_when: false
       failed_when: false
       timeout: 300
+
+    - name: Remove package details payload temp file
+      ansible.builtin.file:
+        path: "{{ pkg_details_tmp.path }}"
+        state: absent
+      changed_when: false
 
     - name: Merge CVE IDs into package details
       ansible.builtin.set_fact:
@@ -385,45 +355,38 @@
       become: false
       run_once: true
 
-    # Flattened + CVE-enriched in one pass, in Python — picking the "worst"
-    # (highest-scored) CVE per package out of a list is easier here than as
-    # nested Jinja lookups across two dicts.
+    - name: Create temp file for enrichment payload
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .json
+      register: enrich_payload_tmp
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Write enrichment payload
+      ansible.builtin.copy:
+        content: "{{ {'hosts': all_host_results, 'cve_info': cve_info | default({})} | to_json }}"
+        dest: "{{ enrich_payload_tmp.path }}"
+        mode: "0600"
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+
     - name: Build enriched package detail rows
-      ansible.builtin.shell: |
-        echo '{{ {"hosts": all_host_results, "cve_info": cve_info | default({})} | to_json }}' | python3 -c "
-        import sys, json
-
-        _input = json.load(sys.stdin)
-        hosts = _input['hosts']
-        cve_info = _input['cve_info']
-
-        rows = []
-        for h in hosts:
-            for pkg in h.get('package_details', []):
-                cve_ids = pkg.get('cve_ids') or []
-                best_id, best_score, best_priority = None, None, None
-                for cid in cve_ids:
-                    info = cve_info.get(cid, {})
-                    score = info.get('score')
-                    if score is not None and (best_score is None or score > best_score):
-                        best_id, best_score, best_priority = cid, score, info.get('priority')
-                if best_id is None and cve_ids:
-                    best_id = cve_ids[0]
-                rows.append({
-                    'hostname': h['hostname'],
-                    'env_name': h['env_name'],
-                    'package_name': pkg['package_name'],
-                    'current_version': pkg.get('current_version') or '',
-                    'new_version': pkg.get('new_version') or '',
-                    'is_security': bool(pkg.get('is_security', False)),
-                    'tier_label': 'SECURITY' if pkg.get('is_security') else 'MAINT',
-                    'cve_id': ', '.join(cve_ids) if cve_ids else None,
-                    'cve_priority': best_priority,
-                    'cvss_score': best_score,
-                })
-        print(json.dumps(rows))
-        "
+      ansible.builtin.script: "../scripts/enrich_package_rows.py {{ enrich_payload_tmp.path }}"
       register: enriched_rows_json
+      changed_when: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Remove enrichment payload temp file
+      ansible.builtin.file:
+        path: "{{ enrich_payload_tmp.path }}"
+        state: absent
       changed_when: false
       delegate_to: localhost
       become: false
